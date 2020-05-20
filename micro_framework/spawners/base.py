@@ -9,6 +9,7 @@ class Spawner:
     """
     Mixin to Executors
     """
+
     def spawn(self, target_fn, callback, *fn_args, **fn_kwargs):
         fn_args = fn_args or tuple()
         fn_kwargs = fn_kwargs or dict()
@@ -24,11 +25,6 @@ class Spawner:
 
     def kill(self):
         self.shutdown(wait=False)
-
-
-
-
-
 
 
 def worker_init():

@@ -1,7 +1,9 @@
 # TODO get configurations somehow
 import inspect
 import logging.config
+import signal
 import time
+from functools import partial
 from importlib import import_module
 
 from micro_framework.extensions import Extension
@@ -29,6 +31,44 @@ def run_function(function_path, *args, dependencies=None):
     for name, dependency in dependencies.items():
         dependency.after_call()
     return result
+
+
+class Worker:
+    def __init__(self, route, failure_route=False):
+        self.function_path = route.function_path
+        if failure_route:
+            self.function_path = route.exception_function_path
+        self.config = route.runner.config
+        self._dependencies = route.dependencies
+        self._translators = route.translators
+
+    def call_dependencies(self, action, *args, **kwargs):
+        ret = {}
+        for name, dependency in self._dependencies.items():
+            ret[name] = getattr(dependency, action)(*args, **kwargs)
+        return ret
+
+    def get_callable(self):
+        *module, function = self.function_path.split('.')
+        function = getattr(import_module('.'.join(module)), function)
+        return function
+
+    def start(self, *args):
+        self.function = self.get_callable()
+        self.call_dependencies('setup')
+        self.dependencies = self.call_dependencies('get_dependency', self)
+        self.call_dependencies('before_call', self)
+        result = None
+        fn_args = args
+        for translator in self._translators:
+            fn_args = translator.translate(*fn_args)
+        try:
+            result = self.function(*args, **self.dependencies)
+        except Exception as exc:
+            self.call_dependencies('after_call', result, exc, self)
+            raise
+        self.call_dependencies('after_call', result, None, self)
+        return result
 
 
 class Runner:
@@ -82,9 +122,10 @@ class Runner:
             except Exception:
                 self.is_running = False
                 self.stop()
+                raise
         logger.info("Runner stopped")
 
-    def stop(self):
+    def stop(self, *args):
         logger.info("Stopping all extensions and workers")
         # Stopping Routes First
         self._call_extensions_action('stop', extension_set=self.routes)
@@ -98,19 +139,51 @@ class Runner:
         logger.debug("Stopping any still running extensions thread")
         self.extension_spawner.stop(wait=False)
 
-    def spawn_worker(self, target_fn, callback, fn_args, dependencies=None):
+    def spawn_worker(self, route, callback, fn_args):
+        """
+        Spawn a new worker to execute a function from the calling route.
+
+        :param Route route: The route that called it
+        :param function callback: A callback to handle the result
+        :param fn_args: Arguments of the function to be called.
+        :return Future: A Future object of the task.
+        """
+        worker = Worker(route)
         future = self.spawner.spawn(
-            run_function, callback, target_fn, *fn_args,
-            dependencies=dependencies
+            worker.start, callback, *fn_args
         )
-        self.spawned_workers[future] = getattr(target_fn, '__name__')
+        self.spawned_workers[future] = route
         return future
 
-    def spawn_thread(self, target_fn, callback, fn_args, fn_kwargs):
-        future = self.extension_spawner.spawn(target_fn, callback, fn_args,
-                                              fn_kwargs)
-        self.spawned_threads[future] = getattr(target_fn, '__name__')
+    def spawn_extension(self, extension, target_fn, callback, *fn_args,
+                        **fn_kwargs):
+        """
+        Any extension that needs a separate thread should call this method to
+        start a new thread for it.
+        :param Extension extension: An extension subclass
+        :param function target_fn: the function to be executed.
+        :param function callback: A callback function to handle the
+        result/error
+        :param fn_args: Any argument to be passed to the target function.
+        :param fn_kwargs: Any named argument to be passed to the target
+        function.
+        :return Future: A future object of the task.
+        """
+        if callback is None:
+            callback = self.extension_thread_callback
+        future = self.extension_spawner.spawn(
+            target_fn, callback, *fn_args, **fn_kwargs
+        )
+        self.spawned_threads[future] = extension
         return future
+
+    def extension_thread_callback(self, future):
+        """
+        Handle the result of an extension when it's worker is finished either
+        by an error or simply shutting down.
+        """
+        if future.exception():
+            raise future.exception()
 
 
 def find_extensions(cls):
