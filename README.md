@@ -1,2 +1,44 @@
 # Micro Framework
 (yet another) Python Microservices Framework. It is inspired by Nameko but without the class service style and the ability to work with processes or threads.
+
+
+## Usage
+ To use, simply create a module to start, define your routes and identify the
+  function to be called by that route.
+  
+  ** Note that the function is only the path. That is to enable us to do some
+   script import configurations like django.setup() in the worker only.
+   
+* python main.py
+```python
+import logging
+from micro_framework.runner import Runner
+from micro_framework.amqp.routes import EventRoute
+from micro_framework.amqp.dependencies import Producer
+ 
+config = {
+    'AMQP_URI': 'amqp://localhost:5672',
+    'MAX_WORKERS': 3,
+    'SERVICE_NAME': 'my_service',
+    'WORKER_MODE': 'thread' # or process
+}
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+
+routes = [
+    EventRoute('source_service', 'event_name', 'tasks.test', 
+               dependencies={'producer': Producer()}),
+]
+if __name__ == '__main__':
+    runner = Runner(routes, config)
+    runner.start()
+
+```
+
+* task.py
+```python
+def test(payload, producer):
+    # business_logic
+    producer('event_name', {})
+```

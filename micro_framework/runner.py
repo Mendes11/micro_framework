@@ -1,9 +1,7 @@
 # TODO get configurations somehow
 import inspect
 import logging.config
-import signal
 import time
-from functools import partial
 from importlib import import_module
 
 from micro_framework.extensions import Extension
