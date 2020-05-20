@@ -5,6 +5,7 @@ from functools import partial
 from kombu import Connection
 from kombu.mixins import ConsumerMixin
 
+from micro_framework.exceptions import ExtensionIsStopped
 from micro_framework.extensions import Extension
 
 logger = logging.getLogger(__name__)
@@ -33,9 +34,11 @@ class ConsumerManager(Extension, ConsumerMixin):
         self.run_thread = self.runner.spawn_extension(self, self.run, None)
 
     def stop(self):
+        logger.debug("AMQP ConsumerManager is stopping")
         self.should_stop = True
         wait([self.run_thread])
         self.connection.close()
+        logger.debug("AMQP ConsumerManager stopped.")
 
     def add_route(self, route):
         queue = route.queue
@@ -56,7 +59,11 @@ class ConsumerManager(Extension, ConsumerMixin):
 
     def on_message(self, route, body, message):
         logger.debug("Message Received")
-        route.on_message(payload=body, message=message)
+        if not self.should_stop:
+            try:
+                route.on_message(payload=body, message=message)
+            except ExtensionIsStopped:
+                pass
 
     def acknowledge_message(self, message):
         message.ack()

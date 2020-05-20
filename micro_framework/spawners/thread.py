@@ -1,9 +1,12 @@
+import logging
 import multiprocessing
 import threading
 from concurrent.futures import _base
 from multiprocessing.queues import Queue
 
 from micro_framework.spawners.base import Spawner, Task
+
+logger = logging.getLogger(__name__)
 
 
 def thread_worker(executor, write_queue):
@@ -67,7 +70,6 @@ class ThreadSpawner(Spawner, _base.Executor):
         for thread in self._pool:
             self.write_queue.put(None)  # Signalling workers to stop
         if wait:
-            print("Gracefully shutting down workers...")
+            logger.info("Gracefully shutting down thread workers...")
             for thread in self._pool:
                 thread.join()  # Wait process to finish current task
-        print("Finished shutting down")

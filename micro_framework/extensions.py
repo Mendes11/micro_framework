@@ -10,17 +10,27 @@ class Extension:
     It also binds sub-extensions (Extension inside another)
     """
     runner = None
+    __extension_params = None
+
+    def __new__(cls, *args, **kwargs):
+        # Hack from Nameko's Extension to enable us to instantiate a new
+        # Extension on Bind independent of the arguments it has on __init__
+        inst = super(Extension, cls).__new__(cls)
+        inst.__params = (args, kwargs)
+        return inst
 
     def bind(self, runner):
         """
         Binds the extension to the service runner.
         :param Runner runner: Service Runner
         """
-        if not self.runner:
-            self.runner = runner
-        for attr_name, atrr_value in inspect.getmembers(
+        if self.runner is not None:
+            raise AssertionError("This extension is already bound.")
+        self.runner = runner
+        # Binding sub-extensions
+        for attr_name, extension in inspect.getmembers(
                 self, lambda x: isinstance(x, Extension)):
-            atrr_value.bind(runner)
+            extension.bind(runner)
 
     def setup(self):
         """

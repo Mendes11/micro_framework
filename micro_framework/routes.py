@@ -1,5 +1,6 @@
 from functools import partial
 
+from micro_framework.exceptions import ExtensionIsStopped
 from micro_framework.extensions import Extension
 
 
@@ -22,6 +23,7 @@ class Route(Extension):
         self._translators = translators or self.default_translator
         self._function_path = function_path
         self.runner = None
+        self.stopped = False
 
     def on_success(self, result, **callback_kwargs):
         pass
@@ -40,6 +42,8 @@ class Route(Extension):
         pass
 
     def start_route(self, *fn_args, callback_kwargs=None):
+        if self.stopped:
+            raise ExtensionIsStopped()
         if callback_kwargs is None:
             callback_kwargs = {}
         callback = partial(
@@ -57,6 +61,9 @@ class Route(Extension):
         if self.dependencies:
             for name, dependency in self.dependencies.items():
                 dependency.bind(runner)
+
+    def stop(self):
+        self.stopped = True
 
     @property
     def dependencies(self):

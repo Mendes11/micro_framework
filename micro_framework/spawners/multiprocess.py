@@ -1,3 +1,4 @@
+import logging
 import multiprocessing
 import signal
 import threading
@@ -8,6 +9,8 @@ from queue import Empty
 
 from micro_framework.spawners.base import Spawner, Task, CallItem
 
+
+logger = logging.getLogger(__name__)
 
 def initializer():
     signal.signal(signal.SIGINT, None)
@@ -84,7 +87,7 @@ class ProcessSpawner(Spawner, _base.Executor):
         with self.shutdown_lock:
             self.shutdown_signal = True
         if wait:
-            print("Gracefully shutting down workers...")
+            logger.info("Gracefully shutting down workers...")
             while not self.call_queue.empty():
                 self.call_queue.get()
             for process in self._pool:
@@ -93,7 +96,7 @@ class ProcessSpawner(Spawner, _base.Executor):
                 process.join()  # Wait process to finish
                 process.close()
         else:
-            print("Terminating workers.")
+            logger.info("Terminating workers.")
             for process in self._pool:
                 process.terminate()
         # This will trigger a sleeping _queue_handler_task
@@ -101,7 +104,6 @@ class ProcessSpawner(Spawner, _base.Executor):
             self.shutdown_pool = True
         self.read_queue.put(None)
         self._queue_handler_task.join()
-        print("Finished shutting down")
 
     def _send_task_to_process(self):
         while True:

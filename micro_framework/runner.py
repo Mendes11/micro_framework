@@ -34,10 +34,8 @@ def run_function(function_path, *args, dependencies=None):
 
 
 class Worker:
-    def __init__(self, route, failure_route=False):
+    def __init__(self, route):
         self.function_path = route.function_path
-        if failure_route:
-            self.function_path = route.exception_function_path
         self.config = route.runner.config
         self._dependencies = route.dependencies
         self._translators = route.translators
@@ -81,8 +79,8 @@ class Runner:
         self.is_running = False
         self.spawned_workers = {}
         self.spawned_threads = {}
+        self.bind_routes()
         self.extra_extensions = self._find_extensions()
-        self.bind_extensions()
         logger.debug(f"Extensions: {self.extensions}")
 
     def _call_extensions_action(self, action, extension_set=None):
@@ -102,11 +100,11 @@ class Runner:
     def extensions(self):
         return {*self.routes, *self.extra_extensions}
 
-    def bind_extensions(self):
-        for extension in self.extensions:
-            if not isinstance(extension, Extension):
+    def bind_routes(self):
+        for route in self.routes:
+            if not isinstance(route, Extension):
                 raise TypeError("Only Extensions should be added as a route.")
-            extension.bind(self)
+            route.bind(self)
 
     def start(self):
         logger.info("Starting Runner")
