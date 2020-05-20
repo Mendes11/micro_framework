@@ -1,6 +1,22 @@
 # Micro Framework
 (yet another) Python Microservices Framework. It is inspired by Nameko but without the class service style and the ability to work with processes or threads.
 
+## Components
+* Runner: It is the component that will start your service. You instantiate
+ it with the configuration and the routes.
+ 
+* Route: A route is the link between an entrypoint and a function with the
+ business logic. The route is responsible to trigger based on the kind of
+  route you selected and ask for the Runner to call the function.
+  
+  You can define dependencies that this function has and also add translators
+  , which will convert the entrypoint message to a desired format.
+
+* Dependency: It's a class that should be passed to the target function which
+ can be configured based on some configurations of the route/runner.
+ 
+* MessageTranslator: Transforms a message into another message.
+
 
 ## Usage
  To use, simply create a module to start, define your routes and identify the
