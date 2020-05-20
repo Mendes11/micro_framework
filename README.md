@@ -1,5 +1,8 @@
 # Micro Framework
-(yet another) Python Microservices Framework. It is inspired by Nameko but without the class service style and the ability to work with processes or threads.
+(yet another) Python Microservices Framework capable of running functions in
+ threads or processes. 
+ 
+It is inspired by Nameko but without the class service style.
 
 ## Components
 * Runner: It is the component that will start your service. You instantiate
