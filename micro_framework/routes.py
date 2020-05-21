@@ -1,4 +1,4 @@
-from functools import partial
+from importlib import import_module
 
 from micro_framework.exceptions import ExtensionIsStopped
 from micro_framework.extensions import Extension
@@ -16,45 +16,81 @@ class Route(Extension):
     only when a new worker is spawned, making any setup from imports and etc
     (Django i'm looking to you) run in the spawned worker.
     """
-    default_translator = []
 
-    def __init__(self, function_path, dependencies, translators):
+    def __init__(self, function_path, dependencies=None, translators=None):
         self._dependencies = dependencies or {}
-        self._translators = translators or self.default_translator
+        self._translators = translators or []
         self._function_path = function_path
         self.runner = None
         self.stopped = False
+        self.current_workers = {}
 
-    def on_success(self, result, **callback_kwargs):
-        pass
+    def get_callable(self):
+        *module, function = self.function_path.split('.')
+        function = getattr(import_module('.'.join(module)), function)
+        return function
 
-    def on_failure(self, exception, **callback_kwargs):
-        pass
+    def call_dependencies(self, action, *args, **kwargs):
+        ret = {}
+        for name, dependency in self._dependencies.items():
+            ret[name] = getattr(dependency, action)(*args, **kwargs)
+        return ret
 
-    def route_result(self, future, function_args, **kwargs):
+    def route_result(self, future):
         exception = future.exception()
         if exception:
-            self.on_failure(exception, **kwargs)
+            print("Exception")
+            # self.on_failure(exception, **kwargs)
             raise exception
-        self.on_success(future.result(), **kwargs)
+        print("Success")
+        print(future.test)
+        # self.on_success(future.result(), **kwargs)
 
-    def failure_route_result(self, future, function_args, **kwargs):
-        pass
-
-    def start_route(self, *fn_args, callback_kwargs=None):
+    def start_route(
+            self, success_callback, failure_callback, *fn_args, **fn_kwargs
+    ):
         if self.stopped:
             raise ExtensionIsStopped()
-        if callback_kwargs is None:
-            callback_kwargs = {}
-        callback = partial(
-            self.route_result, function_args=fn_args, **callback_kwargs
-        )
+        worker = self.as_worker()
         future = self.runner.spawn_worker(
-            route=self,
-            callback=callback,
-            fn_args=fn_args,
+            worker,
+            *fn_args,
+            **fn_kwargs
         )
-        return future
+        self.current_workers[future] = {
+            'worker': worker,
+            'success_callback': success_callback,
+            'failure_callback': failure_callback
+        }
+        future.add_done_callback(self.route_result)
+        return worker
+
+    def run(self, *args, **kwargs):
+        self.function = self.get_callable()
+        self.call_dependencies('setup')
+        self.injected_dependencies = self.call_dependencies(
+            'get_dependency', self
+        )
+        result = None
+        self.fn_args = args
+        self.fn_kwargs = kwargs
+        for translator in self._translators:
+            args, kwargs = translator.translate(*args, **kwargs)
+
+        try:
+            fn_kwargs = {**kwargs, **self.dependencies}  # Updating kwargs
+            result = self.function(*args, **fn_kwargs)
+        except Exception as exc:
+            self.call_dependencies('after_call', result, exc, self)
+            raise
+        self.call_dependencies('after_call', result, None, self)
+        return result
+
+    def as_worker(self):
+        unbinded_instance = type(self)(
+            *self.__params[0], **self.__params[1]
+        )
+        return unbinded_instance
 
     def bind(self, runner):
         super(Route, self).bind(runner)

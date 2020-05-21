@@ -68,16 +68,16 @@ class Worker:
 
 
 class Runner:
-    def __init__(self, routes, config):
+    def __init__(self, entrypoints, config):
         self.config = config
-        self.routes = routes
+        self.entrypoints = entrypoints
         worker_mode = config.get('WORKER_MODE', 'thread')
         self.spawner = SPAWNERS[worker_mode](config['MAX_WORKERS'])
         self.extension_spawner = ThreadSpawner()
         self.is_running = False
         self.spawned_workers = {}
         self.spawned_threads = {}
-        self.bind_routes()
+        self.bind_extensions()
         self.extra_extensions = self._find_extensions()
         logger.debug(f"Extensions: {self.extensions}")
 
@@ -90,19 +90,20 @@ class Runner:
 
     def _find_extensions(self):
         extra_extensions = set()
-        for route in self.routes:
-            extra_extensions.update(find_extensions(route))
+        for entrypoint in self.entrypoints:
+            extra_extensions.update(find_extensions(entrypoint))
         return extra_extensions
 
     @property
     def extensions(self):
-        return {*self.routes, *self.extra_extensions}
+        return {*self.entrypoints, *self.extra_extensions}
 
-    def bind_routes(self):
-        for route in self.routes:
-            if not isinstance(route, Extension):
-                raise TypeError("Only Extensions should be added as a route.")
-            route.bind(self)
+    def bind_extensions(self):
+        for entrypoint in self.entrypoints:
+            if not isinstance(entrypoint, Extension):
+                raise TypeError("Only Extensions should be added as a "
+                                "entrypoints.")
+            entrypoint.bind(self)
 
     def start(self):
         logger.info("Starting Runner")
@@ -123,8 +124,8 @@ class Runner:
 
     def stop(self, *args):
         logger.info("Stopping all extensions and workers")
-        # Stopping Routes First
-        self._call_extensions_action('stop', extension_set=self.routes)
+        # Stopping Entrypoints First
+        self._call_extensions_action('stop', extension_set=self.entrypoints)
         # Stop Workers
         logger.debug("Stopping workers")
         self.spawner.stop(wait=True)
@@ -135,23 +136,21 @@ class Runner:
         logger.debug("Stopping any still running extensions thread")
         self.extension_spawner.stop(wait=False)
 
-    def spawn_worker(self, route, callback, fn_args):
+    def spawn_worker(self, worker, *fn_args, callback=None, **fn_kwargs):
         """
         Spawn a new worker to execute a function from the calling route.
 
         :param Route route: The route that called it
-        :param function callback: A callback to handle the result
         :param fn_args: Arguments of the function to be called.
         :return Future: A Future object of the task.
         """
-        worker = Worker(route)
         future = self.spawner.spawn(
-            worker.start, callback, *fn_args
+            worker.run, callback, *fn_args, **fn_kwargs
         )
-        self.spawned_workers[future] = route
+        self.spawned_workers[future] = worker
         return future
 
-    def spawn_extension(self, extension, target_fn, callback, *fn_args,
+    def spawn_extension(self, extension, target_fn, *fn_args, callback=None,
                         **fn_kwargs):
         """
         Any extension that needs a separate thread should call this method to

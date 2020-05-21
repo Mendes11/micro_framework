@@ -10,7 +10,7 @@ class Extension:
     It also binds sub-extensions (Extension inside another)
     """
     runner = None
-    __extension_params = None
+    __params = None
 
     def __new__(cls, *args, **kwargs):
         # Hack from Nameko's Extension to enable us to instantiate a new
