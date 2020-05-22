@@ -1,7 +1,13 @@
+import logging
 from functools import partial
+
+from memory_profiler import profile
 
 from micro_framework.exceptions import ExtensionIsStopped
 from micro_framework.extensions import Extension
+from micro_framework.workers import Worker
+
+logger = logging.getLogger(__name__)
 
 
 class Route(Extension):
@@ -16,51 +22,51 @@ class Route(Extension):
     only when a new worker is spawned, making any setup from imports and etc
     (Django i'm looking to you) run in the spawned worker.
     """
-    default_translator = []
 
-    def __init__(self, function_path, dependencies, translators):
+    def __init__(self, function_path, dependencies=None, translators=None,
+                 worker_class=Worker):
         self._dependencies = dependencies or {}
-        self._translators = translators or self.default_translator
+        self._translators = translators or []
         self._function_path = function_path
-        self.runner = None
         self.stopped = False
+        self.current_workers = {}
+        self.entrypoint = None
+        self.worker_class = worker_class
 
-    def on_success(self, result, **callback_kwargs):
-        pass
+    def route_result(self, entry_id, future):
+        logger.debug(f"{self} Received a worker result.")
+        # Cleaning runner
+        self.runner.spawned_workers.pop(future)
+        if future.exception():
+            # Unhandled exception propagate it to kill thread.
+            raise future.exception()
+        worker = future.result()
+        if worker.exception:
+            return self.entrypoint.on_failed_route(entry_id, worker)
+        return self.entrypoint.on_success_route(entry_id, worker)
 
-    def on_failure(self, exception, **callback_kwargs):
-        pass
+    def get_worker_instance(self, *fn_args, **fn_kwargs):
+        return self.worker_class(
+            self.function_path, self.dependencies.copy(),
+            self.translators.copy(), self.runner.config, *fn_args, **fn_kwargs
+        )
 
-    def route_result(self, future, function_args, **kwargs):
-        exception = future.exception()
-        if exception:
-            self.on_failure(exception, **kwargs)
-            raise exception
-        self.on_success(future.result(), **kwargs)
-
-    def failure_route_result(self, future, function_args, **kwargs):
-        pass
-
-    def start_route(self, *fn_args, callback_kwargs=None):
+    def start_route(self, entry_id, *fn_args, **fn_kwargs):
         if self.stopped:
             raise ExtensionIsStopped()
-        if callback_kwargs is None:
-            callback_kwargs = {}
-        callback = partial(
-            self.route_result, function_args=fn_args, **callback_kwargs
-        )
-        future = self.runner.spawn_worker(
-            route=self,
-            callback=callback,
-            fn_args=fn_args,
-        )
-        return future
+        worker = self.get_worker_instance(*fn_args, **fn_kwargs)
+        future = self.runner.spawn_worker(worker)
+        future.add_done_callback(partial(self.route_result, entry_id))
+        return worker
 
     def bind(self, runner):
         super(Route, self).bind(runner)
         if self.dependencies:
             for name, dependency in self.dependencies.items():
                 dependency.bind(runner)
+
+    def bind_entrypoint(self, entrypoint):
+        self.entrypoint = entrypoint
 
     def stop(self):
         self.stopped = True

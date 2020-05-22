@@ -1,19 +1,14 @@
 from datetime import datetime
 
 from micro_framework.amqp.dependencies import dispatch
-from micro_framework.amqp.routes import EventRoute
 
 
-class EventBackOff:
+class BackOff:
     max_retries = None
-    interval = 10 # ms
+    interval = 10  # ms
     exception_list = None
 
     def __init__(self, route):
-        if not isinstance(route, EventRoute):
-            raise TypeError(
-                "EventBackOff can only be applied to EventRoute class."
-            )
         self.route = route
 
     def get_interval(self):
@@ -25,7 +20,19 @@ class EventBackOff:
     def get_exception_list(self):
         return self.exception_list
 
-    def should_retry(self, payload):
+    def should_retry(self, payload, exception):
+        return all(
+            [
+                self.retry_count_is_lower(payload),
+                self.retry_time_is_due(payload),
+                self.exception_in_list(exception)
+             ]
+        )
+
+    def exception_in_list(self, exception):
+        return exception in self.exception_list
+
+    def retry_count_is_lower(self, payload):
         meta = payload.get('_meta', {})
         current_retries = meta.get('n_retries', 0)
         if current_retries < self.get_max_retries():

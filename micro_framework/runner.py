@@ -2,82 +2,39 @@
 import inspect
 import logging.config
 import time
-from importlib import import_module
 
 from micro_framework.extensions import Extension
-from micro_framework.spawners.multiprocess import ProcessSpawner
-from micro_framework.spawners.thread import ThreadSpawner
+from micro_framework.spawners.multiprocess import ProcessSpawner, \
+    ProcessPoolSpawner
+from micro_framework.spawners.thread import ThreadSpawner, ThreadPoolSpawner
 
+
+# Greedy Spawner means that the runner will consume all received tasks so far
+# when a stop signal is sent.
+
+# The non-greedy spawner will finish the current tasks and skip all pending
+# ones. (Entrypoints with acknowledge are good candidates for this)
 SPAWNERS = {
-    'thread': ThreadSpawner,
-    'process': ProcessSpawner
+    'thread': ThreadSpawner, # Will
+    'process': ProcessSpawner,
+    'greedy_thread': ThreadPoolSpawner, # Will consume all received tasks on stop
+    'greedy_process': ProcessPoolSpawner, # Will consume all received tasks
 }
 
 logger = logging.getLogger(__name__)
 
 
-def run_function(function_path, *args, dependencies=None):
-    dependencies = dependencies or {}
-    *module, function = function_path.split('.')
-    function = getattr(import_module('.'.join(module)), function)
-    injected_dependencies = {}
-    for name, dependency in dependencies.items():
-        dependency.before_call()
-        injected_dependencies[name] = dependency.get_dependency()
-
-    result = function(*args, **injected_dependencies)
-    for name, dependency in dependencies.items():
-        dependency.after_call()
-    return result
-
-
-class Worker:
-    def __init__(self, route):
-        self.function_path = route.function_path
-        self.config = route.runner.config
-        self._dependencies = route.dependencies
-        self._translators = route.translators
-
-    def call_dependencies(self, action, *args, **kwargs):
-        ret = {}
-        for name, dependency in self._dependencies.items():
-            ret[name] = getattr(dependency, action)(*args, **kwargs)
-        return ret
-
-    def get_callable(self):
-        *module, function = self.function_path.split('.')
-        function = getattr(import_module('.'.join(module)), function)
-        return function
-
-    def start(self, *args):
-        self.function = self.get_callable()
-        self.call_dependencies('setup')
-        self.dependencies = self.call_dependencies('get_dependency', self)
-        self.call_dependencies('before_call', self)
-        result = None
-        fn_args = args
-        for translator in self._translators:
-            fn_args = translator.translate(*fn_args)
-        try:
-            result = self.function(*args, **self.dependencies)
-        except Exception as exc:
-            self.call_dependencies('after_call', result, exc, self)
-            raise
-        self.call_dependencies('after_call', result, None, self)
-        return result
-
-
 class Runner:
-    def __init__(self, routes, config):
+    def __init__(self, entrypoints, config):
         self.config = config
-        self.routes = routes
-        worker_mode = config.get('WORKER_MODE', 'thread')
-        self.spawner = SPAWNERS[worker_mode](config['MAX_WORKERS'])
+        self.entrypoints = entrypoints
+        self.worker_mode = config.get('WORKER_MODE', 'thread')
+        self.spawner = SPAWNERS[self.worker_mode](config['MAX_WORKERS'])
         self.extension_spawner = ThreadSpawner()
         self.is_running = False
         self.spawned_workers = {}
         self.spawned_threads = {}
-        self.bind_routes()
+        self.bind_extensions()
         self.extra_extensions = self._find_extensions()
         logger.debug(f"Extensions: {self.extensions}")
 
@@ -90,22 +47,26 @@ class Runner:
 
     def _find_extensions(self):
         extra_extensions = set()
-        for route in self.routes:
-            extra_extensions.update(find_extensions(route))
+        for entrypoint in self.entrypoints:
+            extra_extensions.update(find_extensions(entrypoint))
         return extra_extensions
 
     @property
     def extensions(self):
-        return {*self.routes, *self.extra_extensions}
+        return {*self.entrypoints, *self.extra_extensions}
 
-    def bind_routes(self):
-        for route in self.routes:
-            if not isinstance(route, Extension):
-                raise TypeError("Only Extensions should be added as a route.")
-            route.bind(self)
+    def bind_extensions(self):
+        for entrypoint in self.entrypoints:
+            if not isinstance(entrypoint, Extension):
+                raise TypeError("Only Extensions should be added as a "
+                                "entrypoints.")
+            entrypoint.bind(self)
 
     def start(self):
-        logger.info("Starting Runner")
+        logger.info(
+            f"Starting Runner with {self.config['MAX_WORKERS']}"
+            f" {self.worker_mode} workers"
+        )
         self._call_extensions_action('setup')
         self._call_extensions_action('start')
         self.is_running = True
@@ -113,18 +74,17 @@ class Runner:
             try:
                 time.sleep(1)
             except KeyboardInterrupt:
-                self.is_running = False
                 self.stop()
             except Exception:
-                self.is_running = False
                 self.stop()
                 raise
         logger.info("Runner stopped")
 
     def stop(self, *args):
+        self.is_running = False
         logger.info("Stopping all extensions and workers")
-        # Stopping Routes First
-        self._call_extensions_action('stop', extension_set=self.routes)
+        # Stopping Entrypoints First
+        self._call_extensions_action('stop', extension_set=self.entrypoints)
         # Stop Workers
         logger.debug("Stopping workers")
         self.spawner.stop(wait=True)
@@ -135,23 +95,21 @@ class Runner:
         logger.debug("Stopping any still running extensions thread")
         self.extension_spawner.stop(wait=False)
 
-    def spawn_worker(self, route, callback, fn_args):
+    def spawn_worker(self, worker, *fn_args, callback=None, **fn_kwargs):
         """
         Spawn a new worker to execute a function from the calling route.
 
         :param Route route: The route that called it
-        :param function callback: A callback to handle the result
         :param fn_args: Arguments of the function to be called.
         :return Future: A Future object of the task.
         """
-        worker = Worker(route)
         future = self.spawner.spawn(
-            worker.start, callback, *fn_args
+            worker.run, callback, *fn_args, **fn_kwargs
         )
-        self.spawned_workers[future] = route
+        self.spawned_workers[future] = worker
         return future
 
-    def spawn_extension(self, extension, target_fn, callback, *fn_args,
+    def spawn_extension(self, extension, target_fn, *fn_args, callback=None,
                         **fn_kwargs):
         """
         Any extension that needs a separate thread should call this method to
@@ -179,6 +137,8 @@ class Runner:
         by an error or simply shutting down.
         """
         if future.exception():
+            print("Exception in thread.")
+            self.stop()
             raise future.exception()
 
 
