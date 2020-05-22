@@ -10,13 +10,13 @@ class Extension:
     It also binds sub-extensions (Extension inside another)
     """
     runner = None
-    __params = None
+    _params = None
 
     def __new__(cls, *args, **kwargs):
         # Hack from Nameko's Extension to enable us to instantiate a new
         # Extension on Bind independent of the arguments it has on __init__
         inst = super(Extension, cls).__new__(cls)
-        inst.__params = (args, kwargs)
+        inst._params = (args, kwargs)
         return inst
 
     def bind(self, runner):

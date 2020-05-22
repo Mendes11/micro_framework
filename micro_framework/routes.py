@@ -2,6 +2,7 @@ from importlib import import_module
 
 from micro_framework.exceptions import ExtensionIsStopped
 from micro_framework.extensions import Extension
+from micro_framework.workers import Worker
 
 
 class Route(Extension):
@@ -17,86 +18,49 @@ class Route(Extension):
     (Django i'm looking to you) run in the spawned worker.
     """
 
-    def __init__(self, function_path, dependencies=None, translators=None):
+    def __init__(self, function_path, dependencies=None, translators=None,
+                 worker_class=Worker):
         self._dependencies = dependencies or {}
         self._translators = translators or []
         self._function_path = function_path
-        self.runner = None
         self.stopped = False
         self.current_workers = {}
-
-    def get_callable(self):
-        *module, function = self.function_path.split('.')
-        function = getattr(import_module('.'.join(module)), function)
-        return function
-
-    def call_dependencies(self, action, *args, **kwargs):
-        ret = {}
-        for name, dependency in self._dependencies.items():
-            ret[name] = getattr(dependency, action)(*args, **kwargs)
-        return ret
+        self.entrypoint = None
+        self.worker_class = worker_class
 
     def route_result(self, future):
-        exception = future.exception()
-        if exception:
-            print("Exception")
-            # self.on_failure(exception, **kwargs)
-            raise exception
-        print("Success")
-        print(future.test)
-        # self.on_success(future.result(), **kwargs)
+        if future.exception():
+            # Unhandled exception
+            raise future.exception()
+        worker = future.result()
+        if worker.exception:
+            self.entrypoint.on_failed_route(worker)
+        self.entrypoint.on_success_route(worker)
 
-    def start_route(
-            self, success_callback, failure_callback, *fn_args, **fn_kwargs
-    ):
+    def get_worker_instance(self, entry_id, *fn_args, **fn_kwargs):
+        return self.worker_class(
+            entry_id, self.function_path, self.dependencies, self.translators,
+            *fn_args, **fn_kwargs
+        )
+
+    def start_route(self, entry_id, *fn_args, **fn_kwargs):
         if self.stopped:
             raise ExtensionIsStopped()
-        worker = self.as_worker()
-        future = self.runner.spawn_worker(
-            worker,
-            *fn_args,
-            **fn_kwargs
-        )
-        self.current_workers[future] = {
-            'worker': worker,
-            'success_callback': success_callback,
-            'failure_callback': failure_callback
-        }
+        worker = self.get_worker_instance(entry_id, *fn_args, **fn_kwargs)
+        future = self.runner.spawn_worker(worker)
+        # Before adding a callback to the future obj we register it
+        self.current_workers[future] = worker
         future.add_done_callback(self.route_result)
         return worker
-
-    def run(self, *args, **kwargs):
-        self.function = self.get_callable()
-        self.call_dependencies('setup')
-        self.injected_dependencies = self.call_dependencies(
-            'get_dependency', self
-        )
-        result = None
-        self.fn_args = args
-        self.fn_kwargs = kwargs
-        for translator in self._translators:
-            args, kwargs = translator.translate(*args, **kwargs)
-
-        try:
-            fn_kwargs = {**kwargs, **self.dependencies}  # Updating kwargs
-            result = self.function(*args, **fn_kwargs)
-        except Exception as exc:
-            self.call_dependencies('after_call', result, exc, self)
-            raise
-        self.call_dependencies('after_call', result, None, self)
-        return result
-
-    def as_worker(self):
-        unbinded_instance = type(self)(
-            *self.__params[0], **self.__params[1]
-        )
-        return unbinded_instance
 
     def bind(self, runner):
         super(Route, self).bind(runner)
         if self.dependencies:
             for name, dependency in self.dependencies.items():
                 dependency.bind(runner)
+
+    def bind_entrypoint(self, entrypoint):
+        self.entrypoint = entrypoint
 
     def stop(self):
         self.stopped = True
