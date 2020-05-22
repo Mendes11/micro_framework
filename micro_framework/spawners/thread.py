@@ -3,6 +3,7 @@ import multiprocessing
 import threading
 from concurrent.futures import _base, ThreadPoolExecutor
 from multiprocessing.queues import Queue
+from queue import Empty
 
 from micro_framework.exceptions import PoolStopped
 from micro_framework.spawners.base import Spawner, Task
@@ -69,7 +70,10 @@ class ThreadSpawner(Spawner, _base.Executor):
         logger.debug(f"Clearing Thread write queue "
                      f"({self.write_queue.qsize()})")
         while not self.write_queue.empty():  # Emptying the queue
-            self.write_queue.get(timeout=1)
+            try:
+                self.write_queue.get(timeout=1)
+            except Empty:
+                continue
         logger.debug("Sending stop signal to Threads")
         for thread in self._pool:
             self.write_queue.put(None)  # Signalling workers to stop

@@ -91,7 +91,10 @@ class ProcessSpawner(Spawner, _base.Executor):
         if wait:
             logger.info("Gracefully shutting down workers...")
             while not self.call_queue.empty():
-                self.call_queue.get()
+                try:
+                    self.call_queue.get(timeout=1)
+                except Empty:
+                    continue
             logger.debug("Call Queue Emptied.\nSending signal to stop process")
             for process in self._pool:
                 self.call_queue.put(None)

@@ -1,4 +1,5 @@
 import logging
+from functools import partial
 
 from memory_profiler import profile
 
@@ -32,40 +33,30 @@ class Route(Extension):
         self.entrypoint = None
         self.worker_class = worker_class
 
-    def route_result(self, future):
+    def route_result(self, entry_id, future):
         logger.debug(f"{self} Received a worker result.")
-        entry_id = self.current_workers.pop(future)
         # Cleaning runner
         self.runner.spawned_workers.pop(future)
         if future.exception():
             # Unhandled exception propagate it to kill thread.
             raise future.exception()
         worker = future.result()
-        if entry_id is None:
-            # This was already dealed with.
-            logger.debug('Route result already treated.')
-            return
         if worker.exception:
             return self.entrypoint.on_failed_route(entry_id, worker)
         return self.entrypoint.on_success_route(entry_id, worker)
 
     def get_worker_instance(self, *fn_args, **fn_kwargs):
         return self.worker_class(
-            self.function_path, self.dependencies,
-            self.translators, self.runner.config, *fn_args, **fn_kwargs
+            self.function_path, self.dependencies.copy(),
+            self.translators.copy(), self.runner.config, *fn_args, **fn_kwargs
         )
 
     def start_route(self, entry_id, *fn_args, **fn_kwargs):
         if self.stopped:
             raise ExtensionIsStopped()
         worker = self.get_worker_instance(*fn_args, **fn_kwargs)
-        try:
-            future = self.runner.spawn_worker(worker)
-        except Exception:
-            return self.entrypoint.on_failure(entry_id)
-        # Before adding a callback to the future obj we register it
-        self.current_workers[future] = entry_id
-        future.add_done_callback(self.route_result)
+        future = self.runner.spawn_worker(worker)
+        future.add_done_callback(partial(self.route_result, entry_id))
         return worker
 
     def bind(self, runner):

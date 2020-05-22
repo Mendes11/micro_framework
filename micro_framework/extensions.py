@@ -9,7 +9,7 @@ class Extension:
     An element to be bind into the Service Runner.
     It also binds sub-extensions (Extension inside another)
     """
-    runner = None
+    _runner = None
     _params = None
 
     def __new__(cls, *args, **kwargs):
@@ -24,9 +24,12 @@ class Extension:
         Binds the extension to the service runner.
         :param Runner runner: Service Runner
         """
-        if self.runner is not None:
-            raise AssertionError("This extension is already bound.")
-        self.runner = runner
+        if self._runner is not None:
+            return self._runner
+            # TODO Letting all extensions being shareable will impact in
+            #  something?
+            #raise AssertionError("This extension is already bound.")
+        self._runner = runner
         # Binding sub-extensions
         for attr_name, extension in inspect.getmembers(
                 self, lambda x: isinstance(x, Extension)):
@@ -49,3 +52,10 @@ class Extension:
         Commands the extension to do a graceful stop
         """
         pass
+
+    @property
+    def runner(self):
+        if self._runner is None:
+            raise RuntimeError("This extension is not binded. You must bind "
+                               "it to a runner before trying to attempt this.")
+        return self._runner

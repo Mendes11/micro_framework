@@ -74,15 +74,14 @@ class Runner:
             try:
                 time.sleep(1)
             except KeyboardInterrupt:
-                self.is_running = False
                 self.stop()
             except Exception:
-                self.is_running = False
                 self.stop()
                 raise
         logger.info("Runner stopped")
 
     def stop(self, *args):
+        self.is_running = False
         logger.info("Stopping all extensions and workers")
         # Stopping Entrypoints First
         self._call_extensions_action('stop', extension_set=self.entrypoints)
@@ -138,6 +137,8 @@ class Runner:
         by an error or simply shutting down.
         """
         if future.exception():
+            print("Exception in thread.")
+            self.stop()
             raise future.exception()
 
 
