@@ -1,4 +1,3 @@
-import uuid
 from logging import getLogger
 
 from kombu import Exchange, Queue
@@ -30,11 +29,13 @@ class EventListener(Entrypoint):
         self.queue.declare()
         self.manager.add_entrypoint(self)
 
-    def on_success_route(self, entry_id, worker):
+    def on_finished_route(self, entry_id, worker):
+        # We ack the message independently of the result.
         self.manager.ack_message(entry_id)
 
-    def on_failed_route(self, entry_id, worker):
-        self.manager.ack_message(entry_id)
+    def on_failure(self, entry_id):
+        # Something not related to the business logic went wrong.
+        self.manager.requeue_message(entry_id)
 
     @property
     def queue_name(self):

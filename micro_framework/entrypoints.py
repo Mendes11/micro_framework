@@ -37,10 +37,7 @@ class Entrypoint(Extension):
             logger.exception("Failure when trying to start route for "
                              f"entrypoint: {self}")
 
-    def on_success_route(self, entry_id, worker):
-        pass
-
-    def on_failed_route(self, entry_id, worker):
+    def on_finished_route(self, entry_id, worker):
         pass
 
     def on_failure(self, entry_id):
@@ -51,26 +48,21 @@ class TimeEntrypoint(Entrypoint):
     def __init__(self, interval, route: Route):
         self.interval = interval
         self.running = False
-        self.pending_entries = {}
         super(TimeEntrypoint, self).__init__(route)
 
     def start(self):
         self.running = True
         self.runner.spawn_extension(self, self.run)
 
-    def on_success_route(self, entry_id, worker):
-        self.pending_entries.pop(entry_id)
-        print(len(self.pending_entries))
-
-    def on_failed_route(self, entry_id, worker):
-        raise worker.exception
+    def on_finished_route(self, entry_id, worker):
+        if worker.exception:
+            raise worker.exception
 
     def run(self):
         while self.running:
             t1 = timer()
             entry_id = uuid.uuid4()
             now = datetime.utcnow()
-            self.pending_entries[entry_id] = now
             self.new_entry(entry_id, now.isoformat())
             elapsed_time = timer() - t1
             sleep_time = self.interval - elapsed_time
