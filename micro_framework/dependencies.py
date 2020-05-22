@@ -21,7 +21,7 @@ class Dependency(Extension):
         """
         pass
 
-    def after_call(self, result, exception, worker):
+    def after_call(self, worker, result, exc):
         """
         Cleanup after the function has finished or raised.
         """

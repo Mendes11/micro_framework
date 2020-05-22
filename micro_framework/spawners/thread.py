@@ -1,9 +1,10 @@
 import logging
 import multiprocessing
 import threading
-from concurrent.futures import _base
+from concurrent.futures import _base, ThreadPoolExecutor
 from multiprocessing.queues import Queue
 
+from micro_framework.exceptions import PoolStopped
 from micro_framework.spawners.base import Spawner, Task
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ def thread_worker(executor, write_queue):
             if executor.shutdown_signal:
                 # Shutdown signal
                 return
-        task = executor._tasks[task_id]
+        task = executor._tasks.pop(task_id)  # Remove to avoid Mem. inflating.
         task.run()
 
 
@@ -51,7 +52,7 @@ class ThreadSpawner(Spawner, _base.Executor):
     def submit(self, target_fn, *args, **kwargs):
         with self.shutdown_lock:
             if self.shutdown_signal:
-                raise Exception("This pool is being shutdown.")
+                raise PoolStopped("This pool is being shutdown.")
         task = self.create_task(target_fn, *args, **kwargs)
         self._tasks[task.task_id] = task
         self.write_queue.put(task.task_id)
@@ -65,11 +66,23 @@ class ThreadSpawner(Spawner, _base.Executor):
         # gracefully stop it... The difference is that since it is a daemon,
         # we just skip joining the thread and leave to the parent process to
         # stop.
+        logger.debug(f"Clearing Thread write queue "
+                     f"({self.write_queue.qsize()})")
         while not self.write_queue.empty():  # Emptying the queue
-            self.write_queue.get()
+            self.write_queue.get(timeout=1)
+        logger.debug("Sending stop signal to Threads")
         for thread in self._pool:
             self.write_queue.put(None)  # Signalling workers to stop
         if wait:
             logger.info("Gracefully shutting down thread workers...")
             for thread in self._pool:
                 thread.join()  # Wait process to finish current task
+        logger.debug("Thread Pool Finished")
+
+
+class ThreadPoolSpawner(Spawner, ThreadPoolExecutor):
+
+    def shutdown(self, wait: bool = ...) -> None:
+        logger.info("Greedy Worker shutdown initiated, wait until all pending "
+                    "tasks are consumed.")
+        super(ThreadPoolSpawner, self).shutdown(wait)

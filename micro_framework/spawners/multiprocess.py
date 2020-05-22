@@ -2,18 +2,20 @@ import logging
 import multiprocessing
 import signal
 import threading
-from concurrent.futures import _base
+from concurrent.futures import _base, ProcessPoolExecutor
+from concurrent.futures.process import _ExceptionWithTraceback
 from multiprocessing.context import Process
 from multiprocessing.queues import Queue
 from queue import Empty
 
+from micro_framework.exceptions import PoolStopped
 from micro_framework.spawners.base import Spawner, Task, CallItem
 
 
 logger = logging.getLogger(__name__)
 
-def initializer():
-    signal.signal(signal.SIGINT, None)
+def process_initializer():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 def process_worker(call_queue, result_queue):
@@ -30,7 +32,7 @@ def process_worker(call_queue, result_queue):
         try:
             result = function(*fn_args, **fn_kwargs)
         except Exception as _exc:
-            exc = _exc
+            exc = _ExceptionWithTraceback(_exc, _exc.__traceback__)
         result_queue.put((call_item.task_id, result, exc))
 
 
@@ -75,7 +77,7 @@ class ProcessSpawner(Spawner, _base.Executor):
     def submit(self, target_fn, *args, **kwargs):
         with self.shutdown_lock:
             if self.shutdown_signal:
-                raise Exception("This pool is being shutdown.")
+                raise PoolStopped("This pool is being shutdown.")
         task = self.create_task(target_fn, *args, **kwargs)
         self._tasks[task.task_id] = task
         self.write_queue.put(task.task_id)
@@ -90,8 +92,10 @@ class ProcessSpawner(Spawner, _base.Executor):
             logger.info("Gracefully shutting down workers...")
             while not self.call_queue.empty():
                 self.call_queue.get()
+            logger.debug("Call Queue Emptied.\nSending signal to stop process")
             for process in self._pool:
                 self.call_queue.put(None)
+            logger.debug("Signal sent. Joining Processes to shutdown.")
             for process in self._pool:
                 process.join()  # Wait process to finish
                 process.close()
@@ -99,11 +103,13 @@ class ProcessSpawner(Spawner, _base.Executor):
             logger.info("Terminating workers.")
             for process in self._pool:
                 process.terminate()
+        logger.debug("Sending signal to stop queue_handler_task")
         # This will trigger a sleeping _queue_handler_task
         with self.shutdown_lock:
             self.shutdown_pool = True
         self.read_queue.put(None)
         self._queue_handler_task.join()
+        logger.debug("Pool Stopped.")
 
     def _send_task_to_process(self):
         while True:
@@ -120,12 +126,11 @@ class ProcessSpawner(Spawner, _base.Executor):
         if result is None:
             return False
         task_id, result, exc = result
-        future = self._tasks[task_id].future
+        future = self._tasks.pop(task_id).future
         if not exc:
             future.set_result(result)
         else:
             future.set_exception(exc)
-        del self._tasks[task_id]
         return True
 
     def _handle_queues(self):
@@ -138,3 +143,17 @@ class ProcessSpawner(Spawner, _base.Executor):
                     self.write_queue.close()
                     self.call_queue.close()
                     break
+
+
+class ProcessPoolSpawner(Spawner, ProcessPoolExecutor):
+    def __init__(self, max_workers=None, mp_context=None, initializer=None,
+                 initargs=()):
+        if initializer is None:
+            initializer = process_initializer
+        super(ProcessPoolSpawner, self).__init__(max_workers, mp_context,
+                                                 initializer, initargs)
+
+    def shutdown(self, wait: bool = ...) -> None:
+        logger.info("Greedy Worker shutdown initiated, wait until all pending "
+                    "tasks are consumed.")
+        super(ProcessPoolSpawner, self).shutdown(wait)

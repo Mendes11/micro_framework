@@ -1,15 +1,16 @@
+from concurrent.futures.process import _ExceptionWithTraceback
 from importlib import import_module
 
 
 class Worker:
-    def __init__(self, entry_id, function_path, dependencies, translators,
-                 *fn_args, **fn_kwargs):
-        self.entry_id = entry_id
+    def __init__(self, function_path, dependencies, translators,
+                 config, *fn_args, **fn_kwargs):
         self.function_path = function_path
+        self.config = config
         self.fn_args = fn_args
         self.fn_kwargs = fn_kwargs
-        self.dependencies = dependencies or {}
-        self.translators = translators or []
+        self._dependencies = dependencies or {}
+        self._translators = translators or []
         self.result = None
         self.exception = None
 
@@ -20,30 +21,34 @@ class Worker:
 
     def call_dependencies(self, action, *args, **kwargs):
         ret = {}
-        for name, dependency in self.dependencies.items():
+        for name, dependency in self._dependencies.items():
             ret[name] = getattr(dependency, action)(*args, **kwargs)
         return ret
 
     def run(self):
         self.function = self.get_callable()
         self.call_dependencies('setup')
-        self.injected_dependencies = self.call_dependencies(
+        dependencies = self.call_dependencies(
             'get_dependency', self
         )
-        result = None
-        for translator in self.translators:
-            self.args, self.kwargs = translator.translate(
+        self.translated_args = self.fn_args
+        self.translated_kwargs = self.fn_kwargs
+        for translator in self._translators:
+            self.translated_args, self.translated_kwargs = translator.translate(
                 *self.fn_args, **self.fn_kwargs
             )
+        self.call_dependencies('before_call', self)
         try:
             # Updating kwargs
-            fn_kwargs = {**self.fn_kwargs, **self.injected_dependencies}
-            self.result = self.function(*self.fn_args, **fn_kwargs)
+            fn_kwargs = {**self.translated_kwargs, **dependencies}
+            self.result = self.function(*self.translated_args, **fn_kwargs)
         except Exception as exc:
-            self.exception = exc
-            self.call_dependencies('after_call', result, exc, self)
-            del self.dependencies
-            raise
-        self.call_dependencies('after_call', result, None, self)
-        del self.dependencies
+            if self.config.get('WORKER_MODE', 'thread') == 'process':
+                # Trick from concurrent.futures to keep the traceback in
+                # process type worker.
+                self.exception = _ExceptionWithTraceback(exc, exc.__traceback__)
+            else:
+                self.exception = exc
+            self.call_dependencies('after_call', self, self.result, exc)
+        self.call_dependencies('after_call', self, self.result, None)
         return self

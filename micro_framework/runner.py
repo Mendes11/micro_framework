@@ -2,77 +2,34 @@
 import inspect
 import logging.config
 import time
-from importlib import import_module
 
 from micro_framework.extensions import Extension
-from micro_framework.spawners.multiprocess import ProcessSpawner
-from micro_framework.spawners.thread import ThreadSpawner
+from micro_framework.spawners.multiprocess import ProcessSpawner, \
+    ProcessPoolSpawner
+from micro_framework.spawners.thread import ThreadSpawner, ThreadPoolSpawner
 
+
+# Greedy Spawner means that the runner will consume all received tasks so far
+# when a stop signal is sent.
+
+# The non-greedy spawner will finish the current tasks and skip all pending
+# ones. (Entrypoints with acknowledge are good candidates for this)
 SPAWNERS = {
-    'thread': ThreadSpawner,
-    'process': ProcessSpawner
+    'thread': ThreadSpawner, # Will
+    'process': ProcessSpawner,
+    'greedy_thread': ThreadPoolSpawner, # Will consume all received tasks on stop
+    'greedy_process': ProcessPoolSpawner, # Will consume all received tasks
 }
 
 logger = logging.getLogger(__name__)
-
-
-def run_function(function_path, *args, dependencies=None):
-    dependencies = dependencies or {}
-    *module, function = function_path.split('.')
-    function = getattr(import_module('.'.join(module)), function)
-    injected_dependencies = {}
-    for name, dependency in dependencies.items():
-        dependency.before_call()
-        injected_dependencies[name] = dependency.get_dependency()
-
-    result = function(*args, **injected_dependencies)
-    for name, dependency in dependencies.items():
-        dependency.after_call()
-    return result
-
-
-class Worker:
-    def __init__(self, route):
-        self.function_path = route.function_path
-        self.config = route.runner.config
-        self._dependencies = route.dependencies
-        self._translators = route.translators
-
-    def call_dependencies(self, action, *args, **kwargs):
-        ret = {}
-        for name, dependency in self._dependencies.items():
-            ret[name] = getattr(dependency, action)(*args, **kwargs)
-        return ret
-
-    def get_callable(self):
-        *module, function = self.function_path.split('.')
-        function = getattr(import_module('.'.join(module)), function)
-        return function
-
-    def start(self, *args):
-        self.function = self.get_callable()
-        self.call_dependencies('setup')
-        self.dependencies = self.call_dependencies('get_dependency', self)
-        self.call_dependencies('before_call', self)
-        result = None
-        fn_args = args
-        for translator in self._translators:
-            fn_args = translator.translate(*fn_args)
-        try:
-            result = self.function(*args, **self.dependencies)
-        except Exception as exc:
-            self.call_dependencies('after_call', result, exc, self)
-            raise
-        self.call_dependencies('after_call', result, None, self)
-        return result
 
 
 class Runner:
     def __init__(self, entrypoints, config):
         self.config = config
         self.entrypoints = entrypoints
-        worker_mode = config.get('WORKER_MODE', 'thread')
-        self.spawner = SPAWNERS[worker_mode](config['MAX_WORKERS'])
+        self.worker_mode = config.get('WORKER_MODE', 'thread')
+        self.spawner = SPAWNERS[self.worker_mode](config['MAX_WORKERS'])
         self.extension_spawner = ThreadSpawner()
         self.is_running = False
         self.spawned_workers = {}
@@ -106,7 +63,10 @@ class Runner:
             entrypoint.bind(self)
 
     def start(self):
-        logger.info("Starting Runner")
+        logger.info(
+            f"Starting Runner with {self.config['MAX_WORKERS']}"
+            f" {self.worker_mode} workers"
+        )
         self._call_extensions_action('setup')
         self._call_extensions_action('start')
         self.is_running = True
