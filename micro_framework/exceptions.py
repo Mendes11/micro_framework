@@ -7,3 +7,12 @@ class PoolStopped(Exception):
 
 class ExtensionIsStopped(FrameworkException):
     pass
+
+
+class BackOffLimitReached(FrameworkException):
+    pass
+
+
+class BackOffIntervalNotReached(FrameworkException):
+    pass
+

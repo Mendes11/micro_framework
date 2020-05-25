@@ -8,13 +8,16 @@ default_transport_options = {
 }
 
 def dispatch(amqp_uri, service_name, event, payload,
-             transport_options=None):
+             transport_options=None, headers=None, exchange_type='direct',
+             exchange=None):
     if transport_options is None:
         transport_options = default_transport_options
-    exchange = Exchange(service_name, type='direct')
+    if not exchange:
+        exchange = Exchange(service_name, type=exchange_type)
     connection = Connection(amqp_uri, transport_options=transport_options)
     with producers[connection].acquire(block=True) as producer:
-        producer.publish(payload, exchange=exchange, routing_key=event)
+        producer.publish(payload, exchange=exchange, routing_key=event,
+                         headers=headers)
 
 
 class Producer(Dependency):

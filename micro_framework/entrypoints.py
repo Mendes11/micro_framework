@@ -15,18 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 class Entrypoint(Extension):
-    def __init__(self, route: Route):
+    route = None
+
+    def bind_to_route(self, route):
         self.route = route
 
-    def setup(self):
-        self.bind_to_routes()
-
-    def bind_to_routes(self):
-        for name, route in inspect.getmembers(
-                self, lambda x: isinstance(x, Route)):
-            route.bind_entrypoint(self)
-
-    def new_entry(self, entry_id, *args, **kwargs):
+    def call_route(self, entry_id, *args, **kwargs):
         try:
             self.route.start_route(entry_id, *args, **kwargs)
         except PoolStopped:  # Unexpected error and we want to
@@ -37,6 +31,7 @@ class Entrypoint(Extension):
             logger.exception("Failure when trying to start route for "
                              f"entrypoint: {self}")
 
+
     def on_finished_route(self, entry_id, worker):
         pass
 
@@ -45,10 +40,9 @@ class Entrypoint(Extension):
 
 
 class TimeEntrypoint(Entrypoint):
-    def __init__(self, interval, route: Route):
+    def __init__(self, interval):
         self.interval = interval
         self.running = False
-        super(TimeEntrypoint, self).__init__(route)
 
     def start(self):
         self.running = True
