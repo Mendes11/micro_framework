@@ -119,4 +119,7 @@ def test_failure(payload, producer, retry):
      down as greedy_thread.
  
  
- 
+ ## Notes:
+In order to use the AsyncBackoff class, you must install the RabbitMQ 
+plugin: [**rabbitmq_delayed_message_exchange**](https://github.com/rabbitmq/rabbitmq-delayed-message-exchange)
+
