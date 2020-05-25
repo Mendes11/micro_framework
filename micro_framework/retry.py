@@ -25,12 +25,12 @@ class BackOffContext:
         self.last_retry = last_retry
 
 
-class BackOffDependency(Dependency):
+class BackOffData(Dependency):
     def get_dependency(self, worker):
         backoff_meta = worker._meta.get('backoff', {})
         return BackOffContext(
             retry_count=backoff_meta.get('retry_count', 0),
-            last_retry=backoff_meta.get('last_rentry', 0)
+            last_retry=backoff_meta.get('last_retry', 0)
         )
 
 
@@ -39,8 +39,7 @@ class BackOff(Extension):
     Adds BackOff Capability to a failed route. It is responsible to firing
     retries when needed.
     """
-    def __init__(self, max_retries=3, interval=60000, exception_list=None,
-                 dependency_name='backoff_context'):
+    def __init__(self, max_retries=3, interval=60000, exception_list=None):
         """
         :param int max_retries: Total number of retry attempts.
         :param interval: Interval between retries in micro seconds
@@ -49,7 +48,6 @@ class BackOff(Extension):
         self.max_retries = max_retries
         self.interval = interval # Microseconds
         self.exception_list = exception_list
-        self.dependency_name = dependency_name
         self.route = None
 
     def get_interval(self):
@@ -139,8 +137,6 @@ class BackOff(Extension):
 
     def bind_route(self, route):
         self.route = route
-        # We add a new dependency to the route with the given context_name,
-        self.route._dependencies[self.dependency_name] = BackOffDependency()
 
 
 class AsyncBackOff(BackOff, BaseEventListener):
@@ -178,7 +174,6 @@ class AsyncBackOff(BackOff, BaseEventListener):
 
     def bind_route(self, route):
         self.route = route._clone()
-        self.route._dependencies[self.dependency_name] = BackOffDependency()
         self.route._entrypoint = self
         self.route.bind(self.runner)
         self.route.entrypoint.bind_to_route(self.route)

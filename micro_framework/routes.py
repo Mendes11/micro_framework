@@ -35,9 +35,12 @@ class Route(Extension):
         self._backoff = backoff
 
     def handle_finished_worker(self, entry_id, worker):
-        if self.backoff and self.backoff.can_retry(worker):
+
+        if worker.exception and self.backoff and self.backoff.can_retry(worker):
             self.backoff.retry(worker)  # Retry and let the entrypoint finish
         self.entrypoint.on_finished_route(entry_id, worker)
+        if worker.exception:
+            raise worker.exception
 
     def worker_result(self, entry_id, future):
         logger.debug(f"{self} Received a worker result.")
@@ -145,6 +148,7 @@ class CallbackRoute(Route):
         return callback_worker
 
     def handle_finished_worker(self, entry_id, worker):
+        # Callback route will only be called if retry is not valid.
         if self.backoff and self.backoff.can_retry(worker):
             self.backoff.retry(worker)  # Retry and let the entrypoint finish
             return self.entrypoint.on_finished_route(entry_id, worker)
