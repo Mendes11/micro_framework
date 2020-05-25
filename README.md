@@ -18,8 +18,8 @@ but with some different concepts regarding the function call.
   of the framework before creating a worker and after the worker finished the
    execution. It has a default Worker class but accepts a custom one.
    
-   Inside the route you can add dependencies and message translators that
-    will be used by the worker when spawned.
+   Inside the route you can add dependencies, message translators that
+    will be used by the worker when spawned and the entrypoint to trigger it.
   
 
 * Worker: A worker is the class responsible for the function call and the
@@ -33,8 +33,7 @@ but with some different concepts regarding the function call.
 
 
 ## Usage
- To use, simply create a module to start, define your entrypoints and
-  routes.
+ To use, simply create a module to start, define your routes and done.
   
   ** Note that the function is only the path. That is to enable us to do some
    script import configurations like django.setup() in the worker only.
@@ -43,8 +42,9 @@ but with some different concepts regarding the function call.
 ```python
 import logging
 from micro_framework.runner import Runner
-from micro_framework.routes import Route
+from micro_framework.routes import Route, CallbackRoute
 from micro_framework.amqp.entrypoints import EventListener
+from micro_framework.retry import AsyncBackOff, BackOffData
 from micro_framework.amqp.dependencies import Producer
  
 config = {
@@ -57,23 +57,46 @@ config = {
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 
-entrypoints = [
-    EventListener(
-        'source_service', 'event_name', 
-        route=Route('tasks.test', dependencies={'producer': Producer()})
+routes = [
+    CallbackRoute(
+        'tasks.test',
+        callback_function_path='tasks.test_failure', # Called if error and after the backoff max_retries
+        entrypoint=EventListener(
+            source_service='my_exchange', event_name='my_routing_key'
+        ),
+        dependencies={'producer': Producer(), 'retry': BackOffData()},
+        backoff=AsyncBackOff(
+            max_retries=5, interval=10000, exception_list=None
+        ),
+
+    ),
+    Route(
+        'tasks.test2',
+        entrypoint=EventListener(
+            source_service='my_service', event_name='event_name',
+        ),
     ),
 ]
 if __name__ == '__main__':
-    runner = Runner(entrypoints, config)
+    runner = Runner(routes, config)
     runner.start()
+
 
 ```
 
-* task.py
+* tasks.py
 ```python
+
 def test(payload, producer):
     # business_logic
     producer('event_name', {})
+
+def test2(payload):
+    print("Called after test function")
+
+def test_failure(payload, producer, retry):
+    print("Called after test failed and the max_retries is reached.")
+
 ```
 
 
@@ -92,4 +115,6 @@ def test(payload, producer):
     * process: Each worker will run in a different process.
     * greedy_process: Same as process and the same behavior when shutting
      down as greedy_thread.
-   
+ 
+ 
+ 
