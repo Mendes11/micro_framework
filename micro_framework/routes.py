@@ -49,10 +49,11 @@ class Route(Extension):
         worker = future.result()
         self.handle_finished_worker(entry_id, worker)
 
-    def get_worker_instance(self, *fn_args, **fn_kwargs):
+    def get_worker_instance(self, *fn_args, _meta=None, **fn_kwargs):
         return self.worker_class(
             self.function_path, self.dependencies.copy(),
-            self.translators.copy(), self.runner.config, *fn_args, **fn_kwargs
+            self.translators.copy(), self.runner.config, *fn_args, _meta=_meta,
+            **fn_kwargs
         )
 
     def run_worker(self, entry_id, worker, callback=None):
@@ -61,10 +62,10 @@ class Route(Extension):
         future = self.runner.spawn_worker(worker)
         future.add_done_callback(callback)
 
-    def start_route(self, entry_id, *fn_args, **fn_kwargs):
+    def start_route(self, entry_id, *fn_args, _meta=None, **fn_kwargs):
         if self.stopped:
             raise ExtensionIsStopped()
-        worker = self.get_worker_instance(*fn_args, **fn_kwargs)
+        worker = self.get_worker_instance(*fn_args, _meta=_meta, **fn_kwargs)
         self.run_worker(entry_id, worker)
         return worker
 
@@ -117,10 +118,11 @@ class CallbackRoute(Route):
         self.callback_worker_class = callback_worker_class or self.callback_worker_class
 
     def handle_finished_callback_worker(self, entry_id, callback_worker):
-        # TODO Check the best behavior here.
-        return self.entrypoint.on_finished_route(
+        self.entrypoint.on_finished_route(
             entry_id, worker=callback_worker.original_worker
         )
+        if callback_worker.exception:
+            raise callback_worker.exception
 
     def callback_worker_result(self, entry_id, future):
         logger.debug(f"{self} received a callback worker result.")
@@ -136,6 +138,7 @@ class CallbackRoute(Route):
         )
 
     def start_callback_route(self, entry_id, worker):
+        logger.info(f"{self.function_path} failed. Starting callback route.")
         callback_worker = self.get_callback_worker_instance(worker)
         callback = partial(self.callback_worker_result, entry_id)
         self.run_worker(entry_id, callback_worker, callback=callback)
@@ -146,8 +149,10 @@ class CallbackRoute(Route):
             self.backoff.retry(worker)  # Retry and let the entrypoint finish
             return self.entrypoint.on_finished_route(entry_id, worker)
         elif worker.exception and self.callback_function_path:
-            logger.debug("Finished worker has an exception, calling callback "
-                         "route.")
-            return self.start_callback_route(entry_id, worker)
+            logger.debug(
+                "Finished worker has an exception, calling callback route."
+            )
+            self.start_callback_route(entry_id, worker)
+            raise worker.exception
         else:
             super(CallbackRoute, self).handle_finished_worker(entry_id, worker)

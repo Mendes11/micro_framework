@@ -6,6 +6,7 @@ from kombu import Exchange, Queue
 
 from micro_framework.amqp.dependencies import dispatch
 from micro_framework.amqp.entrypoints import EventListener, BaseEventListener
+from micro_framework.dependencies import Dependency
 from micro_framework.entrypoints import Entrypoint
 from micro_framework.exceptions import BackOffLimitReached, \
     BackOffIntervalNotReached
@@ -24,12 +25,22 @@ class BackOffContext:
         self.last_retry = last_retry
 
 
+class BackOffDependency(Dependency):
+    def get_dependency(self, worker):
+        backoff_meta = worker._meta.get('backoff', {})
+        return BackOffContext(
+            retry_count=backoff_meta.get('retry_count', 0),
+            last_retry=backoff_meta.get('last_rentry', 0)
+        )
+
+
 class BackOff(Extension):
     """
     Adds BackOff Capability to a failed route. It is responsible to firing
     retries when needed.
     """
-    def __init__(self, max_retries=3, interval=60000, exception_list=None):
+    def __init__(self, max_retries=3, interval=60000, exception_list=None,
+                 dependency_name='backoff_context'):
         """
         :param int max_retries: Total number of retry attempts.
         :param interval: Interval between retries in micro seconds
@@ -38,6 +49,7 @@ class BackOff(Extension):
         self.max_retries = max_retries
         self.interval = interval # Microseconds
         self.exception_list = exception_list
+        self.dependency_name = dependency_name
         self.route = None
 
     def get_interval(self):
@@ -52,12 +64,12 @@ class BackOff(Extension):
     def exception_in_list(self, exception):
         if not self.exception_list:
             return True
-        return exception in self.exception_list
+        return type(exception) in self.exception_list
 
     def retry_count_is_lower(self, context):
         retry_count = 0
         if context:
-            retry_count = context.retry_count
+            retry_count = context['retry_count']
         if retry_count < self.get_max_retries():
             return True
         return False
@@ -65,13 +77,13 @@ class BackOff(Extension):
     def interval_passed(self, context):
         last_retry = 0
         if context:
-            last_retry = context.last_retry
+            last_retry = context['last_retry']
         if last_retry + self.interval / 1000 < datetime.utcnow().timestamp():
             return True
         return False
 
     def get_context(self, worker):
-        raise NotImplementedError()
+        return worker._meta.get('backoff', None)
 
     def can_retry(self, worker):
         """
@@ -87,11 +99,48 @@ class BackOff(Extension):
              ]
         )
 
-    def retry(self, worker):
+    def update_meta(self, worker):
+        # The arguments should be serializable....
+        # We need to pop the context since it doesn't belong to the original
+        # fn_kwargs
+        context = self.get_context(worker)
+        retry_count = 1
+        if context is not None:
+            retry_count = context['retry_count'] + 1
+        meta = worker._meta or {}
+        updated_backoff = {
+            'retry_count': retry_count,
+            'last_retry': datetime.utcnow().timestamp()
+        }
+        meta.setdefault('backoff', {}).update(updated_backoff)
+        return meta
+
+    def execute_retry(self, updated_worker):
+        """
+        Hook method to implement the retry logic. Ex: AsyncBackOff bellow.
+
+        :param Worker updated_worker: A Worker with updated BackOff _meta
+        """
         raise NotImplementedError()
+
+    def retry(self, worker):
+        """
+        Called to invoke the retry action.
+        It updates the backoff _meta attribute of the worker and send it
+        :param Worker worker: the result worker with information to be used
+        in the retry such as the fn_args and kwargs.
+        """
+        updated_meta = self.update_meta(worker)
+        worker._meta = updated_meta
+        logger.info(f"{worker.function_path} failed, sending retry "
+                    f"{updated_meta['backoff']['retry_count']} of "
+                    f"{self.max_retries}")
+        self.execute_retry(worker)
 
     def bind_route(self, route):
         self.route = route
+        # We add a new dependency to the route with the given context_name,
+        self.route._dependencies[self.dependency_name] = BackOffDependency()
 
 
 class AsyncBackOff(BackOff, BaseEventListener):
@@ -105,38 +154,19 @@ class AsyncBackOff(BackOff, BaseEventListener):
 
     # TODO Maybe adding multiple entrypoints to a route would make this implementation cleaner
     """
-    def __init__(self, max_retries=3, interval=60, exception_list=None,
-                 context_name='backoff_context'):
-        self.context_name = context_name
-        super(AsyncBackOff, self).__init__(max_retries, interval,
-                                           exception_list)
-
     def interval_passed(self, context):
         return True # RabbitMQ handles this.
 
-    def get_context(self, worker):
-        return worker.fn_kwargs.get(self.context_name, None)
-
     def mount_backoff_payload(self, worker):
-        # The arguments should be serializable....
-        # We need to pop the context since it doesn't belong to the original
-        # fn_kwargs
-        context = worker.fn_kwargs.pop(self.context_name, None)
-        retry_count = 1
-        if context is not None:
-            retry_count = context.retry_count + 1
         return {
             'fn_args': worker.fn_args,
             'fn_kwargs': worker.fn_kwargs,
-            'retry_count': retry_count,
-            'last_retry': datetime.utcnow().timestamp()
+            '_meta': worker._meta
         }
 
-    def retry(self, worker):
+    def execute_retry(self, updated_worker):
         # We fire the event to a queue known by the instantiated entrypoint
-        retry_payload = self.mount_backoff_payload(worker)
-        logger.info(f"{worker.function_path} failed, sending retry "
-                    f"{retry_payload['retry_count']} of {self.max_retries}")
+        retry_payload = self.mount_backoff_payload(updated_worker)
         dispatch(
             self.runner.config['AMQP_URI'],
             self.service_name,
@@ -148,6 +178,7 @@ class AsyncBackOff(BackOff, BaseEventListener):
 
     def bind_route(self, route):
         self.route = route._clone()
+        self.route._dependencies[self.dependency_name] = BackOffDependency()
         self.route._entrypoint = self
         self.route.bind(self.runner)
         self.route.entrypoint.bind_to_route(self.route)
@@ -172,11 +203,8 @@ class AsyncBackOff(BackOff, BaseEventListener):
         # BackOff Context to it as kwargs
         fn_args = payload['fn_args']
         fn_kwargs = payload['fn_kwargs']
-        context = BackOffContext(
-            payload['retry_count'], payload['last_retry']
-        )
-        fn_kwargs[self.context_name] = context
-        self.call_route(message, *fn_args, **fn_kwargs)
+        _meta = payload['_meta']
+        self.call_route(message, *fn_args, _meta=_meta, **fn_kwargs)
 
     @property
     def service_name(self):
