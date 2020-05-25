@@ -52,3 +52,16 @@ class Worker:
             self.call_dependencies('after_call', self, self.result, exc)
         self.call_dependencies('after_call', self, self.result, None)
         return self
+
+
+class CallbackWorker(Worker):
+    def __init__(self, callback_function, original_worker):
+        self.callback_function = callback_function
+        self.original_worker = original_worker
+        args = (*original_worker.translated_args, original_worker.exception)
+        kwargs = original_worker.translated_kwargs
+        # We use the already translated content but the dependencies will
+        # have to be re-created due to the pickling problem of Processing.
+        super(CallbackWorker, self).__init__(
+            callback_function, original_worker._dependencies, None,
+            original_worker.config, *args, **kwargs)

@@ -83,3 +83,7 @@ class ConsumerManager(Extension, ConsumerMixin):
     def ack_message(self, message):
         with self.message_lock:  # One message at a time to prevent errors.
             message.ack()
+
+    def requeue_message(self, message):
+        with self.message_lock:
+            message.requeue()

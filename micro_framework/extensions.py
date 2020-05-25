@@ -21,7 +21,7 @@ class Extension:
 
     def bind(self, runner):
         """
-        Binds the extension to the service runner.
+        Binds the extension to the service runner and parent.
         :param Runner runner: Service Runner
         """
         if self._runner is not None:
@@ -52,6 +52,10 @@ class Extension:
         Commands the extension to do a graceful stop
         """
         pass
+
+    def _clone(self):
+        cls = type(self)
+        return cls(*self._params[0], **self._params[1])
 
     @property
     def runner(self):

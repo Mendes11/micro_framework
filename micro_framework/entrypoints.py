@@ -15,18 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 class Entrypoint(Extension):
-    def __init__(self, route: Route):
+    route = None
+
+    def bind_to_route(self, route):
         self.route = route
 
-    def setup(self):
-        self.bind_to_routes()
-
-    def bind_to_routes(self):
-        for name, route in inspect.getmembers(
-                self, lambda x: isinstance(x, Route)):
-            route.bind_entrypoint(self)
-
-    def new_entry(self, entry_id, *args, **kwargs):
+    def call_route(self, entry_id, *args, **kwargs):
         try:
             self.route.start_route(entry_id, *args, **kwargs)
         except PoolStopped:  # Unexpected error and we want to
@@ -37,10 +31,8 @@ class Entrypoint(Extension):
             logger.exception("Failure when trying to start route for "
                              f"entrypoint: {self}")
 
-    def on_success_route(self, entry_id, worker):
-        pass
 
-    def on_failed_route(self, entry_id, worker):
+    def on_finished_route(self, entry_id, worker):
         pass
 
     def on_failure(self, entry_id):
@@ -48,29 +40,23 @@ class Entrypoint(Extension):
 
 
 class TimeEntrypoint(Entrypoint):
-    def __init__(self, interval, route: Route):
+    def __init__(self, interval):
         self.interval = interval
         self.running = False
-        self.pending_entries = {}
-        super(TimeEntrypoint, self).__init__(route)
 
     def start(self):
         self.running = True
         self.runner.spawn_extension(self, self.run)
 
-    def on_success_route(self, entry_id, worker):
-        self.pending_entries.pop(entry_id)
-        print(len(self.pending_entries))
-
-    def on_failed_route(self, entry_id, worker):
-        raise worker.exception
+    def on_finished_route(self, entry_id, worker):
+        if worker.exception:
+            raise worker.exception
 
     def run(self):
         while self.running:
             t1 = timer()
             entry_id = uuid.uuid4()
             now = datetime.utcnow()
-            self.pending_entries[entry_id] = now
             self.new_entry(entry_id, now.isoformat())
             elapsed_time = timer() - t1
             sleep_time = self.interval - elapsed_time

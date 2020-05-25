@@ -3,6 +3,7 @@ import inspect
 import logging.config
 import time
 
+from micro_framework.entrypoints import Entrypoint
 from micro_framework.extensions import Extension
 from micro_framework.spawners.multiprocess import ProcessSpawner, \
     ProcessPoolSpawner
@@ -25,9 +26,9 @@ logger = logging.getLogger(__name__)
 
 
 class Runner:
-    def __init__(self, entrypoints, config):
+    def __init__(self, routes, config):
         self.config = config
-        self.entrypoints = entrypoints
+        self.routes = routes
         self.worker_mode = config.get('WORKER_MODE', 'thread')
         self.spawner = SPAWNERS[self.worker_mode](config['MAX_WORKERS'])
         self.extension_spawner = ThreadSpawner()
@@ -35,7 +36,9 @@ class Runner:
         self.spawned_workers = {}
         self.spawned_threads = {}
         self.bind_extensions()
-        self.extra_extensions = self._find_extensions()
+        self.entrypoints = set()
+        self.extra_extensions = set()
+        self._find_extensions()
         logger.debug(f"Extensions: {self.extensions}")
 
     def _call_extensions_action(self, action, extension_set=None):
@@ -46,28 +49,44 @@ class Runner:
             getattr(extension, action)()
 
     def _find_extensions(self):
-        extra_extensions = set()
-        for entrypoint in self.entrypoints:
-            extra_extensions.update(find_extensions(entrypoint))
-        return extra_extensions
+        for route in self.routes:
+            extensions = find_extensions(route)
+            for extension in extensions:
+                self.register_extension(extension)
 
     @property
     def extensions(self):
-        return {*self.entrypoints, *self.extra_extensions}
+        return {*self.routes, *self.entrypoints, *self.extra_extensions}
 
     def bind_extensions(self):
-        for entrypoint in self.entrypoints:
-            if not isinstance(entrypoint, Extension):
+        for route in self.routes:
+            if not isinstance(route, Extension):
                 raise TypeError("Only Extensions should be added as a "
                                 "entrypoints.")
-            entrypoint.bind(self)
+            route.bind(self)
+
+    def register_extension(self, extension):
+        if isinstance(extension, Entrypoint):
+            self.entrypoints.add(extension)
+        else:
+            self.extra_extensions.add(extension)
 
     def start(self):
         logger.info(
             f"Starting Runner with {self.config['MAX_WORKERS']}"
             f" {self.worker_mode} workers"
         )
-        self._call_extensions_action('setup')
+        # First we tell the routes to bind to their extensions
+        self._call_extensions_action(
+            'bind_to_extensions', extension_set=self.routes
+        )
+        logger.debug(f"Extensions: {self.extensions}")
+        # Once we have all extensions detected:
+        # Setup Routes first then entrypoints last and extra extensions last.
+        self._call_extensions_action('setup', extension_set=self.routes)
+        self._call_extensions_action('setup', extension_set=self.entrypoints)
+        self._call_extensions_action('setup', extension_set=self.extra_extensions)
+
         self._call_extensions_action('start')
         self.is_running = True
         while self.is_running:
@@ -84,7 +103,7 @@ class Runner:
         self.is_running = False
         logger.info("Stopping all extensions and workers")
         # Stopping Entrypoints First
-        self._call_extensions_action('stop', extension_set=self.entrypoints)
+        self._call_extensions_action('stop', extension_set=self.routes)
         # Stop Workers
         logger.debug("Stopping workers")
         self.spawner.stop(wait=True)
