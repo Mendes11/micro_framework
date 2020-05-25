@@ -4,7 +4,7 @@ from importlib import import_module
 
 class Worker:
     def __init__(self, function_path, dependencies, translators,
-                 config, *fn_args, **fn_kwargs):
+                 config, *fn_args, _meta=None, **fn_kwargs):
         self.function_path = function_path
         self.config = config
         self.fn_args = fn_args
@@ -13,6 +13,7 @@ class Worker:
         self._translators = translators or []
         self.result = None
         self.exception = None
+        self._meta = _meta or {} # Content shared by extensions
 
     def get_callable(self):
         *module, function = self.function_path.split('.')
@@ -64,4 +65,5 @@ class CallbackWorker(Worker):
         # have to be re-created due to the pickling problem of Processing.
         super(CallbackWorker, self).__init__(
             callback_function, original_worker._dependencies, None,
-            original_worker.config, *args, **kwargs)
+            original_worker.config, *args, _meta=original_worker._meta,
+            **kwargs)
