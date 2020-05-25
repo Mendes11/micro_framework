@@ -5,6 +5,10 @@
 
 The code structure is inspired by Nameko code (https://github.com/nameko/nameko) 
 but with some different concepts regarding the function call.
+
+## DOCS
+https://python-micro-framework.readthedocs.io/en/latest/
+
 ## INSTALL
 `pip install micro_framework`
 
