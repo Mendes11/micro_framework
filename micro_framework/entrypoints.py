@@ -1,15 +1,11 @@
-import inspect
 import logging
 import time
 import uuid
 from datetime import datetime
 from timeit import default_timer as timer
 
-from memory_profiler import profile
-
 from micro_framework.exceptions import PoolStopped, ExtensionIsStopped
 from micro_framework.extensions import Extension
-from micro_framework.routes import Route
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +26,6 @@ class Entrypoint(Extension):
         except Exception:
             logger.exception("Failure when trying to start route for "
                              f"entrypoint: {self}")
-
 
     def on_finished_route(self, entry_id, worker):
         pass
