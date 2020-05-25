@@ -149,7 +149,7 @@ class CallbackRoute(Route):
 
     def handle_finished_worker(self, entry_id, worker):
         # Callback route will only be called if retry is not valid.
-        if self.backoff and self.backoff.can_retry(worker):
+        if worker.exception and self.backoff and self.backoff.can_retry(worker):
             self.backoff.retry(worker)  # Retry and let the entrypoint finish
             return self.entrypoint.on_finished_route(entry_id, worker)
         elif worker.exception and self.callback_function_path:
