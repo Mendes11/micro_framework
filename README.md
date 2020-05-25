@@ -5,6 +5,8 @@
 
 The code structure is inspired by Nameko code (https://github.com/nameko/nameko) 
 but with some different concepts regarding the function call.
+## INSTALL
+`pip install micro_framework`
 
 ## Components
 * Runner: It is the component that will start your service. You instantiate
