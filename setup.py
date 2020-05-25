@@ -4,7 +4,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     exclude_package_data={"": ["README.md"]},
     name='micro-framework',
-    version='1.0',
+    version='1.0.1',
     description='Framework to create CPU or IO bound microservices.',
     long_description= 'file: README.rst',
     author = 'Rafael Mendes Pacini Bachiega',
