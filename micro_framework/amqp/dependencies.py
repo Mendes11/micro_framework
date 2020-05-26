@@ -26,7 +26,8 @@ class Producer(Dependency):
 
     @property
     def exchange(self):
-        return Exchange(self.config['SERVICE_NAME'], type='direct')
+        exchange_name = f"{self.config['SERVICE_NAME']}.events" # Nameko Compatible
+        return Exchange(exchange_name, type='topic', auto_delete=True)
 
     @property
     def amqp_uri(self):
