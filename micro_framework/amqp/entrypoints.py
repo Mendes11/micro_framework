@@ -15,7 +15,7 @@ class BaseEventListener(Entrypoint):
     routing_key from routing_key attribute.
     """
     manager = ConsumerManager()
-    exchange_type = 'direct'
+    exchange_type = 'topic'
     exchange_name = None
     routing_key = None
 
@@ -25,7 +25,8 @@ class BaseEventListener(Entrypoint):
         :return Exchange:
         """
         return Exchange(
-            name=self.exchange_name, type=self.exchange_type
+            name=self.exchange_name, type=self.exchange_type,
+            auto_delete=True
         )
 
     def get_queue_name(self):
@@ -73,12 +74,28 @@ class BaseEventListener(Entrypoint):
         self.call_route(message, payload)
 
 
-class EventListener(BaseEventListener):
+class QueueListener(BaseEventListener):
+    def __init__(self, exchange_name, routing_key, queue_name=None,
+                 exchange_type='topic'):
+        self.exchange_name = exchange_name
+        self.routing_key = routing_key
+        self.exchange_type = exchange_type
+        self.queue_name = queue_name
+
+    def get_queue_name(self):
+        if self.queue_name:
+            return self.queue_name
+        return super(QueueListener, self).get_queue_name()
+
+
+class EventListener(QueueListener):
     def __init__(self, source_service, event_name):
         self.source_service = source_service
         self.event_name = event_name
-        self.routing_key = event_name
-        self.exchange_name = source_service
+        exchange_name = f'{source_service}.events'  # Nameko Compatible!
+        super(EventListener, self).__init__(
+            exchange_name=exchange_name, routing_key=event_name
+        )
 
     def get_queue_name(self):
         service_name = self.runner.config['SERVICE_NAME']
