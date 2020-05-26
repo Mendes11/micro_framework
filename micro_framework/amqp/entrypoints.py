@@ -9,30 +9,43 @@ logger = getLogger(__name__)
 
 
 class BaseEventListener(Entrypoint):
+    """
+    Base class to handle Queue consuming of a single routing key in an exchange.
+    It declares a Queue, binded to the exchange with exchange_name and with a
+    routing_key from routing_key attribute.
+    """
     manager = ConsumerManager()
     exchange_type = 'direct'
     exchange_name = None
-    queue_name = None
-    event_name = None
-
-    def get_exchange_name(self):
-        return self.exchange_name
+    routing_key = None
 
     def get_exchange(self):
+        """
+        Return the Exchange that will have a queue binded to.
+        :return Exchange:
+        """
         return Exchange(
-            name=self.get_exchange_name(), type=self.exchange_type
+            name=self.exchange_name, type=self.exchange_type
         )
 
     def get_queue_name(self):
-        return self.queue_name
-
-    def get_event_name(self):
-        return self.event_name
+        """
+        Return the name of the queue to be binded.
+        It usually must be unique by consuming entrypoint to avoid the same
+        queue being consumed by multiple different routes.
+        :return str: The name of the Queue
+        """
+        return f'{self.exchange_name}_{self.routing_key}_queue'
 
     def get_queue(self):
+        """
+        Returns the Queue to be created or loaded using the exchange and
+        routing key declared.
+        :return:
+        """
         return Queue(
             name=self.get_queue_name(), exchange=self.get_exchange(),
-            routing_key=self.get_event_name(), durable=True
+            routing_key=self.routing_key, durable=True
         )
 
     def setup(self):
@@ -64,11 +77,11 @@ class EventListener(BaseEventListener):
     def __init__(self, source_service, event_name):
         self.source_service = source_service
         self.event_name = event_name
+        self.routing_key = event_name
+        self.exchange_name = source_service
 
     def get_queue_name(self):
         service_name = self.runner.config['SERVICE_NAME']
         target_fn = self.route.function_path.split('.')[-1]
-        return f'{self.source_service}.{self.event_name}_{service_name}.{target_fn}'
-
-    def get_exchange_name(self):
-        return self.source_service
+        # source_service.something_happened__my_service.target.function
+        return f'{self.source_service}.{self.event_name}__{service_name}.{target_fn}'
