@@ -41,7 +41,7 @@ https://python-micro-framework.readthedocs.io/en/latest/
 ## Usage
  To use, simply create a module to start, define your routes and done.
   
-  ** Note that the function is only the path. That is to enable us to do some
+  ** Note that the target is only the path. That is to enable us to do some
    script import configurations like django.setup() in the worker only.
    
 * python main.py
@@ -57,7 +57,8 @@ config = {
     'AMQP_URI': 'amqp://guest:guest@localhost:5672',
     'MAX_WORKERS': 3,
     'SERVICE_NAME': 'my_service',
-    'WORKER_MODE': 'thread'
+    'MAX_TASKS_PER_CHILD': 2, # currently for process WORKER_MODE only 
+    'WORKER_MODE': 'process'
 }
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 routes = [
     CallbackRoute(
         'tasks.test',
-        callback_function_path='tasks.test_failure', # Called if error and after the backoff max_retries
+        callback_target_path='tasks.test_failure', # Called if error and after the backoff max_retries
         entrypoint=EventListener(
             source_service='my_exchange', event_name='my_routing_key'
         ),
@@ -82,7 +83,19 @@ routes = [
             source_service='my_service', event_name='event_name',
         ),
     ),
+    Route(
+        'tasks.Class',
+        method_name='class_method', # If not provided, the __call__ method is called
+        entrypoint=EventListener(
+            source_service='my_service', event_name='event_name',
+        ),
+        dependencies={'retry':  BackOffData()},
+        backoff=AsyncBackOff(
+            max_retries=5, interval=10000, exception_list=None
+        ),
+    ),
 ]
+
 if __name__ == '__main__':
     runner = Runner(routes, config)
     runner.start()
@@ -92,6 +105,7 @@ if __name__ == '__main__':
 
 * tasks.py
 ```python
+from micro_framework.amqp.dependencies import Producer
 
 def test(payload, producer):
     # business_logic
@@ -103,6 +117,12 @@ def test2(payload):
 def test_failure(payload, producer, retry):
     print("Called after test failed and the max_retries is reached.")
 
+class Class:
+    producer = Producer()
+
+    def class_method(self, payload, retry):
+        # business_logic
+        self.producer('event_name', {})
 ```
 
 
