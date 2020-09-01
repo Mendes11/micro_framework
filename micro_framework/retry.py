@@ -158,7 +158,7 @@ class BackOff(Extension):
         updated_context = self.update_context(context)
         meta['backoff'] = updated_context
         worker._meta = meta  # meta might be a reference so this is ambiguous
-        logger.info(f"{worker.function_path} failed, sending retry action.")
+        logger.info(f"{worker.task_path} failed, sending retry action.")
         self.execute_retry(worker, next_interval)
 
     def bind_route(self, route):
@@ -206,7 +206,7 @@ class AsyncBackOff(BackOff, BaseEventListener):
         self.route.entrypoint.bind_to_route(self.route)
 
     def get_event_name(self):
-        return f"{self.route.function_path}_backoff"
+        return f"{self.route.task_path}_backoff"
 
     def get_exchange(self):
         """
@@ -235,7 +235,7 @@ class AsyncBackOff(BackOff, BaseEventListener):
         retry_count = _meta['backoff']['retry_count']
 
         logger.info(
-            f"{self.route.function_path} retry {retry_count} of "
+            f"{self.route.task_path} retry {retry_count} of "
             f"{self.get_max_retries(_meta['backoff'])}"
         )
         self.call_route(message, *fn_args, _meta=_meta, **fn_kwargs)

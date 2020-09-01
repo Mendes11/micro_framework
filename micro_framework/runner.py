@@ -30,7 +30,14 @@ class Runner:
         self.config = config
         self.routes = routes
         self.worker_mode = config.get('WORKER_MODE', 'thread')
-        self.spawner = SPAWNERS[self.worker_mode](config['MAX_WORKERS'])
+        if self.worker_mode == 'process':
+            self.spawner = SPAWNERS[self.worker_mode](
+                config['MAX_WORKERS'], config['MAX_TASKS_PER_CHILD']
+            )
+        else:
+            self.spawner = SPAWNERS[self.worker_mode](
+                config['MAX_WORKERS']
+            )
         self.extension_spawner = ThreadSpawner()
         self.is_running = False
         self.spawned_workers = {}

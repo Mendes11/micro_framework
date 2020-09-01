@@ -21,12 +21,13 @@ def dispatch(amqp_uri, service_name, event, payload,
 
 
 class Producer(Dependency):
-    def __init__(self, confirm_publish=True):
+    def __init__(self, confirm_publish=True, service_name=None):
+        self.service_name = service_name or self.config['SERVICE_NAME']
         self.confirm_publish = confirm_publish
 
     @property
     def exchange(self):
-        exchange_name = f"{self.config['SERVICE_NAME']}.events" # Nameko Compatible
+        exchange_name = f"{self.service_name}.events" # Nameko Compatible
         return Exchange(exchange_name, type='topic', auto_delete=True)
 
     @property

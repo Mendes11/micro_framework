@@ -23,12 +23,14 @@ class Route(Extension):
     """
     worker_class = Worker
 
-    def __init__(self, function_path, entrypoint, dependencies=None,
-                 translators=None, worker_class=None, backoff=None):
+    def __init__(self, target_path, entrypoint, dependencies=None,
+                 translators=None, worker_class=None, backoff=None,
+                 method_name=None):
         self._entrypoint = entrypoint
         self._dependencies = dependencies or {}
         self._translators = translators or []
-        self._function_path = function_path
+        self._target_path = target_path
+        self._method_name = method_name
         self.stopped = False
         self.current_workers = {}
         self.worker_class = worker_class or self.worker_class
@@ -54,9 +56,9 @@ class Route(Extension):
 
     def get_worker_instance(self, *fn_args, _meta=None, **fn_kwargs):
         return self.worker_class(
-            self.function_path, self.dependencies.copy(),
+            self.target_path, self.dependencies.copy(),
             self.translators.copy(), self.runner.config, *fn_args, _meta=_meta,
-            **fn_kwargs
+            method_name=self.method_name, **fn_kwargs
         )
 
     def run_worker(self, entry_id, worker, callback=None):
@@ -76,7 +78,7 @@ class Route(Extension):
         self.entrypoint.bind_to_route(self)
         if self.dependencies:
             for name, dependency in self.dependencies.items():
-                dependency.bind(self.runner) # TODO Maybe binding later to route only
+                dependency.bind(self.runner.config) # TODO Maybe binding later to route only
         if self.backoff is not None:
             # Link this route to the given backoff class
             self.backoff.bind_route(self)
@@ -89,8 +91,12 @@ class Route(Extension):
         return self._dependencies
 
     @property
-    def function_path(self):
-        return self._function_path
+    def target_path(self):
+        return self._target_path
+
+    @property
+    def method_name(self):
+        return self._method_name
 
     @property
     def translators(self):
@@ -105,7 +111,7 @@ class Route(Extension):
         return self._backoff
 
     def __str__(self):
-        return f'{self.__class__.__name__} -> {self.function_path}'
+        return f'{self.__class__.__name__} -> {self.target_path}'
 
     def __repr__(self):
         return self.__str__()
@@ -114,10 +120,10 @@ class Route(Extension):
 class CallbackRoute(Route):
     callback_worker_class = CallbackWorker
 
-    def __init__(self, *args, callback_function_path,
+    def __init__(self, *args, callback_target_path,
                  callback_worker_class=None, **kwargs):
         super(CallbackRoute, self).__init__(*args, **kwargs)
-        self.callback_function_path = callback_function_path
+        self.callback_target_path = callback_target_path
         self.callback_worker_class = callback_worker_class or self.callback_worker_class
 
     def handle_finished_callback_worker(self, entry_id, callback_worker):
@@ -137,11 +143,11 @@ class CallbackRoute(Route):
 
     def get_callback_worker_instance(self, original_worker):
         return self.callback_worker_class(
-            self.callback_function_path, original_worker
+            self.callback_target_path, original_worker
         )
 
     def start_callback_route(self, entry_id, worker):
-        logger.info(f"{self.function_path} failed. Starting callback route.")
+        logger.info(f"{self.target_path} failed. Starting callback route.")
         callback_worker = self.get_callback_worker_instance(worker)
         callback = partial(self.callback_worker_result, entry_id)
         self.run_worker(entry_id, callback_worker, callback=callback)
@@ -152,7 +158,7 @@ class CallbackRoute(Route):
         if worker.exception and self.backoff and self.backoff.can_retry(worker):
             self.backoff.retry(worker)  # Retry and let the entrypoint finish
             return self.entrypoint.on_finished_route(entry_id, worker)
-        elif worker.exception and self.callback_function_path:
+        elif worker.exception and self.callback_target_path:
             logger.debug(
                 "Finished worker has an exception, calling callback route."
             )

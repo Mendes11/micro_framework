@@ -99,6 +99,8 @@ class EventListener(QueueListener):
 
     def get_queue_name(self):
         service_name = self.runner.config['SERVICE_NAME']
-        target_fn = self.route.function_path.split('.')[-1]
+        target_fn = self.route.target_path.split('.')[-1]
+        if self.route.method_name:
+            target_fn = f"{target_fn}.{self.route.method_name}"
         # source_service.something_happened__my_service.target.function
         return f'{self.source_service}.{self.event_name}__{service_name}.{target_fn}'
