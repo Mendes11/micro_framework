@@ -8,38 +8,53 @@ from multiprocessing.context import Process
 from multiprocessing.queues import Queue
 from queue import Empty
 
+import os
+
 from micro_framework.exceptions import PoolStopped
 from micro_framework.spawners.base import Spawner, Task, CallItem
 
-
 logger = logging.getLogger(__name__)
+
 
 def process_initializer():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
-def process_worker(call_queue, result_queue):
+def process_worker(call_queue, result_queue, max_tasks):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    executed_tasks = 0
     while True:
+
         call_item = call_queue.get()
         if call_item is None:
             # Shutdown signal
             return
+
         function = call_item.target
         fn_args = call_item.target_args or tuple()
         fn_kwargs = call_item.target_kwargs or {}
         result = exc = None
+
         try:
+            logger.debug(f"Worker [PID={os.getpid()}] is starting task "
+                         f"{call_item.task_id}.")
             result = function(*fn_args, **fn_kwargs)
         except Exception as _exc:
             exc = _ExceptionWithTraceback(_exc, _exc.__traceback__)
-        result_queue.put((call_item.task_id, result, exc))
+
+        result_queue.put((call_item.task_id, result, exc, os.getpid()))
+
+        executed_tasks += 1
+        if executed_tasks >= max_tasks:
+            # We no longer need this process to be running.
+            return
 
 
 class ProcessSpawner(Spawner, _base.Executor):
-    def __init__(self, max_workers=3):
+    def __init__(self, max_workers=3, max_tasks_per_child=None):
         self.max_workers = max_workers
-        self._pool = None
+        self.max_tasks_per_child = max_tasks_per_child
+        self._pool = []
         self.ctx = multiprocessing.get_context()
         self.write_queue = Queue(ctx=self.ctx)
         self.read_queue = Queue(ctx=self.ctx)
@@ -58,17 +73,22 @@ class ProcessSpawner(Spawner, _base.Executor):
         self._queue_handler_task.daemon = True
         self._queue_handler_task.start()
 
+    def start_new_process(self):
+        process = Process(
+            target=process_worker,
+            args=(self.call_queue, self.read_queue, self.max_tasks_per_child)
+        )
+        self._pool.append(process)
+        process.daemon = True
+        process.start()
+
+    def terminate_process(self, process):
+        process.terminate()
+        self._pool.remove(process)
+
     def initiate_pool(self):
-        self._pool = [
-            Process(
-                target=process_worker,
-                args=(self.call_queue, self.read_queue)
-            )
-            for _ in range(self.max_workers)
-        ]
-        for process in self._pool:
-            process.daemon = True
-            process.start()
+        for _ in range(self.max_workers):
+            self.start_new_process()
 
     def create_task(self, target, *target_args, **target_kwargs):
         task = Task(self.total_tasks + 1, target, *target_args, **target_kwargs)
@@ -101,7 +121,10 @@ class ProcessSpawner(Spawner, _base.Executor):
             logger.debug("Signal sent. Joining Processes to shutdown.")
             for process in self._pool:
                 process.join()  # Wait process to finish
-                process.close()
+                if hasattr(process, 'close'):
+                    process.close()  # Python 3.7+
+                else:
+                    process.terminate()
         else:
             logger.info("Terminating workers.")
             for process in self._pool:
@@ -128,7 +151,7 @@ class ProcessSpawner(Spawner, _base.Executor):
         result = self.read_queue.get(block=True)
         if result is None:
             return False
-        task_id, result, exc = result
+        task_id, result, exc, pid = result
         future = self._tasks.pop(task_id).future
         if not exc:
             future.set_result(result)
@@ -136,8 +159,24 @@ class ProcessSpawner(Spawner, _base.Executor):
             future.set_exception(exc)
         return True
 
+    def _check_pool(self):
+        """
+        Verify the processes in the pool to spawn a new process in case the
+        count is different than the max_workers
+        :return:
+        """
+        for process in self._pool:
+            if not process.is_alive():
+                logger.debug(
+                    f"Process {process} is dead. Spawning a new process to the "
+                    f"pool."
+                )
+                self.terminate_process(process)
+                self.start_new_process()
+
     def _handle_queues(self):
         while True:
+            self._check_pool()
             self._send_task_to_process()
             result = self._read_task_result()
             with self.shutdown_lock:
