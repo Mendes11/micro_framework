@@ -24,8 +24,10 @@ def process_worker(call_queue, result_queue, max_tasks):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     executed_tasks = 0
     while True:
-
-        call_item = call_queue.get()
+        try:
+            call_item = call_queue.get(timeout=10)
+        except Empty:
+            continue
         if call_item is None:
             # Shutdown signal
             return
@@ -148,7 +150,10 @@ class ProcessSpawner(Spawner, _base.Executor):
             )
 
     def _read_task_result(self):
-        result = self.read_queue.get(block=True)
+        try:
+            result = self.read_queue.get(block=True, timeout=10)
+        except Empty:
+            return False
         if result is None:
             return False
         task_id, result, exc, pid = result
