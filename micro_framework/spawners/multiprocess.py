@@ -115,7 +115,7 @@ class ProcessSpawner(Spawner, _base.Executor):
                     self.call_queue.get(timeout=1)
                 except Empty:
                     continue
-            logger.debug("Call Queue Emptied.\nSending signal to stop process")
+            logger.info("Call Queue Emptied.\nSending signal to stop process")
             for process in self._pool:
                 self.call_queue.put(None)
             logger.debug("Signal sent. Joining Processes to shutdown.")
@@ -165,6 +165,10 @@ class ProcessSpawner(Spawner, _base.Executor):
         count is different than the max_workers
         :return:
         """
+        with self.shutdown_lock:
+            if self.shutdown_signal:
+                return
+
         for process in self._pool:
             if not process.is_alive():
                 logger.debug(
@@ -175,7 +179,7 @@ class ProcessSpawner(Spawner, _base.Executor):
                 self.start_new_process()
 
     def _handle_queues(self):
-        while True:
+        while not self.shutdown_pool:
             self._check_pool()
             self._send_task_to_process()
             result = self._read_task_result()
@@ -184,7 +188,7 @@ class ProcessSpawner(Spawner, _base.Executor):
                     self.read_queue.close()
                     self.write_queue.close()
                     self.call_queue.close()
-                    break
+                    return
 
 
 class ProcessPoolSpawner(Spawner, ProcessPoolExecutor):

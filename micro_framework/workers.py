@@ -28,9 +28,9 @@ class Worker:
     initialized.
 
     """
-    def __init__(self, task_path, dependencies, translators,
+    def __init__(self, target, dependencies, translators,
                  config, *fn_args, _meta=None, method_name=None, **fn_kwargs):
-        self.task_path = task_path
+        self.target = target
         self.method_name = method_name
         self.config = config
         self.fn_args = fn_args
@@ -42,7 +42,7 @@ class Worker:
         self._meta = _meta or {} # Content shared by extensions
 
     def get_callable(self):
-        *module, callable = self.task_path.split('.')
+        *module, callable = self.target.split('.')
         callable = getattr(import_module('.'.join(module)), callable)
         return callable
 
@@ -85,7 +85,10 @@ class Worker:
         return self.result
 
     def run(self):
-        callable = self.get_callable()
+        callable = self.target
+        if isinstance(self.target, str):
+            callable = self.get_callable()
+
         self._class_dependencies = {}
         if inspect.isclass(callable):
             self._class_dependencies = get_class_dependencies(
