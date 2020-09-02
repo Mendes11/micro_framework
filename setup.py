@@ -4,7 +4,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     name='micro-framework',
     url='https://github.com/Mendes11/micro_framework',
-    version='1.2.1',
+    version='1.2.2',
     description='Framework to create CPU or IO bound microservices.',
     long_description= 'file: README.md',
     author = 'Rafael Mendes Pacini Bachiega',
@@ -17,6 +17,6 @@ setuptools.setup(
     'Programming Language :: Python :: 3.7',
     'Programming Language :: Python :: 3.8'],
     install_requires=[
-        "kombu==4.6.8",
+        "kombu>=4.6.8",
     ],
 )
