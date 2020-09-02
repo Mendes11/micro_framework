@@ -15,9 +15,13 @@ class BaseEventListener(Entrypoint):
     routing_key from routing_key attribute.
     """
     manager = ConsumerManager()
-    exchange_type = 'topic'
-    exchange_name = None
-    routing_key = None
+
+    def __init__(self, exchange_name, routing_key, exchange_type='topic',
+                 payload_filter=None):
+        self.exchange_name = exchange_name
+        self.routing_key = routing_key
+        self.exchange_type = exchange_type
+        self.payload_filter = payload_filter
 
     def get_exchange(self):
         """
@@ -71,15 +75,14 @@ class BaseEventListener(Entrypoint):
         :param Message message: Message object
         :param dict|str payload: Event Payload
         """
-        self.call_route(message, payload)
+        if not self.payload_filter or self.payload_filter(payload):
+            return self.call_route(message, payload)
+        self.manager.ack_message(message)
 
 
 class QueueListener(BaseEventListener):
-    def __init__(self, exchange_name, routing_key, queue_name=None,
-                 exchange_type='topic'):
-        self.exchange_name = exchange_name
-        self.routing_key = routing_key
-        self.exchange_type = exchange_type
+    def __init__(self, *args, queue_name=None, **kwargs):
+        super(QueueListener, self).__init__(*args, **kwargs)
         self.queue_name = queue_name
 
     def get_queue_name(self):
@@ -89,17 +92,19 @@ class QueueListener(BaseEventListener):
 
 
 class EventListener(QueueListener):
-    def __init__(self, source_service, event_name):
+    def __init__(self, source_service, event_name, **kwargs):
         self.source_service = source_service
         self.event_name = event_name
         exchange_name = f'{source_service}.events'  # Nameko Compatible!
-        super(EventListener, self).__init__(
-            exchange_name=exchange_name, routing_key=event_name
-        )
+        super(EventListener, self).__init__(exchange_name, event_name, **kwargs)
 
     def get_queue_name(self):
         service_name = self.runner.config['SERVICE_NAME']
-        target_fn = self.route.target_path.split('.')[-1]
+        target = self.route.target
+        if isinstance(target, str):
+            target_fn = target.split('.')[-1]
+        else:
+            target_fn = target.__name__
         if self.route.method_name:
             target_fn = f"{target_fn}.{self.route.method_name}"
         # source_service.something_happened__my_service.target.function
