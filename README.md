@@ -51,8 +51,9 @@ from micro_framework.runner import Runner
 from micro_framework.routes import Route, CallbackRoute
 from micro_framework.amqp.entrypoints import EventListener
 from micro_framework.retry import AsyncBackOff, BackOffData
-from micro_framework.amqp.dependencies import Producer
- 
+from micro_framework.amqp.dependencies import Producer 
+from tasks import test2
+
 config = {
     'AMQP_URI': 'amqp://guest:guest@localhost:5672',
     'MAX_WORKERS': 3,
@@ -67,7 +68,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 routes = [
     CallbackRoute(
         'tasks.test',
-        callback_target_path='tasks.test_failure', # Called if error and after the backoff max_retries
+        callback_target='tasks.test_failure', # Called if error and after the backoff max_retries
         entrypoint=EventListener(
             source_service='my_exchange', event_name='my_routing_key'
         ),
@@ -78,9 +79,11 @@ routes = [
 
     ),
     Route(
-        'tasks.test2',
+        test2, # We also allow a direct reference instead of path.
         entrypoint=EventListener(
             source_service='my_service', event_name='event_name',
+            # Only trigger the Route if this condition bellow is met.
+            payload_filter=lambda payload: payload['some_key'] == 'some_value' 
         ),
     ),
     Route(
@@ -141,7 +144,8 @@ class Class:
     * process: Each worker will run in a different process.
     * greedy_process: Same as process and the same behavior when shutting
      down as greedy_thread.
- 
+ * MAX_TASKS_PER_CHILD: (process mode only) Kill the process after handling N
+  tasks and then start a new one.
  
  ## Notes:
 In order to use the AsyncBackoff class, you must install the RabbitMQ 
