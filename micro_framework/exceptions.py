@@ -7,3 +7,7 @@ class PoolStopped(Exception):
 
 class ExtensionIsStopped(FrameworkException):
     pass
+
+
+class RPCTargetDoesNotExist(FrameworkException):
+    pass
