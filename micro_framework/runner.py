@@ -2,6 +2,7 @@
 import inspect
 import logging.config
 import time
+from asyncio import get_event_loop
 
 from micro_framework.entrypoints import Entrypoint
 from micro_framework.extensions import Extension
@@ -46,6 +47,7 @@ class Runner:
         self.entrypoints = set()
         self.extra_extensions = set()
         self._find_extensions()
+        self.event_loop = get_event_loop()
         logger.debug(f"Extensions: {self.extensions}")
 
     def _call_extensions_action(self, action, extension_set=None):
@@ -98,7 +100,8 @@ class Runner:
         self.is_running = True
         while self.is_running:
             try:
-                time.sleep(1)
+                self.event_loop.run_forever()
+                # time.sleep(1)
             except KeyboardInterrupt:
                 self.stop()
             except Exception:
@@ -107,6 +110,7 @@ class Runner:
         logger.info("Runner stopped")
 
     def stop(self, *args):
+        self.event_loop.stop()
         self.is_running = False
         logger.info("Stopping all extensions and workers")
         # Stopping Entrypoints First
@@ -120,6 +124,7 @@ class Runner:
         # Stop running extensions
         logger.debug("Stopping any still running extensions thread")
         self.extension_spawner.stop(wait=False)
+        self.event_loop.close()
 
     def spawn_worker(self, worker, *fn_args, callback=None, **fn_kwargs):
         """
