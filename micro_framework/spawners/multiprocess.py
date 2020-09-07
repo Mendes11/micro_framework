@@ -24,8 +24,11 @@ def process_worker(call_queue, result_queue, max_tasks):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     executed_tasks = 0
     while True:
-
-        call_item = call_queue.get()
+        try:
+            call_item = call_queue.get(timeout=10)
+            logger.debug(f"Worker {os.getpid()} Received message")
+        except Empty:
+            continue
         if call_item is None:
             # Shutdown signal
             return
@@ -41,12 +44,13 @@ def process_worker(call_queue, result_queue, max_tasks):
             result = function(*fn_args, **fn_kwargs)
         except Exception as _exc:
             exc = _ExceptionWithTraceback(_exc, _exc.__traceback__)
-
+        logger.debug(f'Worker {os.getpid()} finished message handling')
         result_queue.put((call_item.task_id, result, exc, os.getpid()))
 
         executed_tasks += 1
-        if executed_tasks >= max_tasks:
+        if max_tasks and executed_tasks >= max_tasks:
             # We no longer need this process to be running.
+            logger.debug(f"Worker {os.getpid()} reached its max_tasks")
             return
 
 
@@ -100,6 +104,7 @@ class ProcessSpawner(Spawner, _base.Executor):
                 raise PoolStopped("This pool is being shutdown.")
         task = self.create_task(target_fn, *args, **kwargs)
         self._tasks[task.task_id] = task
+        logger.debug("Sending task to write queue")
         self.write_queue.put(task.task_id)
         self.read_queue.put(None)  # Wake up queue handler
         self.total_tasks += 1
@@ -141,16 +146,24 @@ class ProcessSpawner(Spawner, _base.Executor):
         while True:
             try:
                 task_id = self.write_queue.get(block=False)
+                logger.debug("Write queue received task")
             except Empty:
                 return
+            logger.debug("Sending task to call queue")
             self.call_queue.put(
                 CallItem.from_task(self._tasks[task_id])
             )
 
     def _read_task_result(self):
-        result = self.read_queue.get(block=True)
-        if result is None:
+        try:
+            result = self.read_queue.get(block=True, timeout=10)
+            logger.debug("Received Read message")
+        except Empty:
             return False
+        if result is None:
+            logger.debug("Received Message is None")
+            return False
+        logger.debug("Received Message is a worker response")
         task_id, result, exc, pid = result
         future = self._tasks.pop(task_id).future
         if not exc:
@@ -168,12 +181,13 @@ class ProcessSpawner(Spawner, _base.Executor):
         with self.shutdown_lock:
             if self.shutdown_signal:
                 return
-
+        logger.debug(f"Checking for dead processes in the pool. Currently "
+                    f"{self._pool} processes in the pool.")
         for process in self._pool:
             if not process.is_alive():
                 logger.debug(
-                    f"Process {process} is dead. Spawning a new process to the "
-                    f"pool."
+                    f"Process {process} - PID: {process.pid} is dead. Spawning "
+                    f"a new process to the pool."
                 )
                 self.terminate_process(process)
                 self.start_new_process()
