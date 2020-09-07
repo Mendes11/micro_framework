@@ -17,6 +17,6 @@ setuptools.setup(
     'Programming Language :: Python :: 3.7',
     'Programming Language :: Python :: 3.8'],
     install_requires=[
-        "kombu>=4.6.8", "websockets==8.1"
+        "kombu>=4.6.8", "websockets==8.1", "websocket-client==0.57.0"
     ],
 )
