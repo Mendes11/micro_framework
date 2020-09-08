@@ -112,11 +112,6 @@ class Runner:
 
         logger.info("Stopping all extensions and workers")
 
-        # Summary: Please Stop!!
-        self.event_loop.call_soon_threadsafe(self.event_loop.stop)
-        self.event_loop.stop()
-        self.event_loop.close()
-
         # Stopping Entrypoints First
         self._call_extensions_action('stop', extension_set=self.routes)
         # Stop Workers
@@ -128,6 +123,10 @@ class Runner:
         # Stop running extensions
         logger.debug("Stopping any still running extensions thread")
         self.extension_spawner.stop(wait=False)
+
+        # Summary: Please Stop!!
+        self.event_loop.call_soon_threadsafe(self.event_loop.stop)
+        self.event_loop.stop()
         self.event_loop.close()
 
     def spawn_worker(self, worker, *fn_args, callback=None, **fn_kwargs):
