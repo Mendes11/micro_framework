@@ -1,6 +1,7 @@
 from functools import partial
 
 from micro_framework.entrypoints import Entrypoint
+from micro_framework.exceptions import FrameworkException
 from micro_framework.websocket.manager import WebSocketManager
 
 
@@ -27,7 +28,7 @@ class WebSocketEntrypoint(Entrypoint):
         )
 
     def on_failure(self, entry_id):
-        exception = FrameWorkException("RPC Server failed unexpectedly.")
+        exception = FrameworkException("RPC Server failed unexpectedly.")
         self.manager.send_to_client(
             entry_id, data=None, exception=exception
         )
