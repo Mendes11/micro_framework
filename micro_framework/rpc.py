@@ -1,13 +1,94 @@
-import asyncio
 import inspect
 import json
 import logging
-import traceback
+import threading
 
-from micro_framework.exceptions import RPCTargetDoesNotExist
+from abc import ABC, abstractmethod
+from concurrent.futures._base import Future
+
+from micro_framework.dependencies import Dependency
+from micro_framework.exceptions import RPCTargetDoesNotExist, \
+    RPCException
 from micro_framework.extensions import Extension
 
 logger = logging.getLogger(__name__)
+
+
+def import_exception(exception):
+    if exception['exception'] in __builtins__:
+        return __builtins__[exception['exception']](exception['message'])
+    return RPCException(exception)
+
+
+def format_rpc_command(command, *args, **kwargs):
+    """
+    Returns a json str with the expected structure to communicate with our
+    RPCManager.
+
+    :param str command: RPC Command. Can be either list/get targets or a call
+    to the target by its name.
+    :param args: Arguments to be sent to the RPC Command.
+    :param kwargs: Key Arguments to be sent to the RPC Command.
+    :return str: JSON Command
+    """
+    return json.dumps({
+        'command': command, 'command_args': args, 'command_kwargs': kwargs
+    })
+
+
+def format_rpc_response(data, exception=None):
+    """
+    Formats a response from a RPC Manager.
+    It provides the data and/or a serialized exception so it can be
+    re-created by the caller.
+
+    :param Any data: A JSON Serializable object.
+    :param Exception exception: An Exception object
+    :return str: JSON Response.
+    """
+    exception_data = None
+    if exception:
+        exception_data = {
+            'exception': type(exception).__name__,
+            'message': str(exception),
+        }
+    return json.dumps({
+        'data': data,
+        'exception': exception_data
+    })
+
+
+def parse_rpc_response(message):
+    """
+    Reads a response returned by the RPC Manager.
+    It returns either a loaded JSON or an exception if the exception key is
+    not None.
+
+    :param str message: JSON Response
+    :return dict|list|Exception: Loaded RPC Response.
+    """
+    response = json.loads(message)
+    if response.get('exception'):
+        return import_exception(response['exception'])
+    return response.get('data')
+
+
+class RPCClient(ABC):
+    @abstractmethod
+    def __enter__(self):
+        ...
+
+    @abstractmethod
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        ...
+
+    @abstractmethod
+    def send(self, message):
+        ...
+
+    @abstractmethod
+    def recv(self):
+        ...
 
 
 class RPCManagerMixin(Extension):
@@ -63,19 +144,6 @@ class RPCManagerMixin(Extension):
             response = self.__call_target__(client, command, *args, **kwargs)
         return response
 
-    def format_rpc_response(self, data, exception=None):
-        exception_data = None
-        if exception:
-            exception_data = {
-                'exception': exception.__class__.__name__,
-                'message': str(exception),
-                'traceback': traceback.format_exc()
-            }
-        return json.dumps({
-            'data': data,
-            'exception': exception_data
-        })
-
     def consume_message(self, client, message):
         """
         Consume the message, returning the method based on the rpc command.
@@ -96,8 +164,8 @@ class RPCManagerMixin(Extension):
                 client, command, *command_args, **command_kwargs
             )
         except Exception as exc:
-            return self.format_rpc_response(None, exc)
-        return self.format_rpc_response(response)
+            return format_rpc_response(None, exc)
+        return format_rpc_response(response)
 
     def target_detail(self, entrypoint):
         """
@@ -213,9 +281,9 @@ class AsyncRPCManagerMixin(RPCManagerMixin):
                 client, command, *command_args, **command_kwargs
             )
         except Exception as exc:
-            return self.format_rpc_response(None, exc)
+            return format_rpc_response(None, exc)
         if response:
-            response = self.format_rpc_response(response)
+            response = format_rpc_response(response)
         return response
 
     async def __call_target__(self, client, target, *args, **kwargs):
@@ -233,3 +301,175 @@ class AsyncRPCManagerMixin(RPCManagerMixin):
             )
         entrypoint = self.entrypoints[target]
         await self.call_entrypoint(client, entrypoint, *args, **kwargs)
+
+
+class RPCTarget:
+    """
+    Represents a Route's target from the connected server.
+
+    It exposes methods to call the target synchronously or asynchronously.
+
+    """
+    def __init__(self, client: RPCClient, target, *args, docstring=None, **kwargs):
+        self.client = client
+        self.target = target
+        self.target_args = args
+        self.target_kwargs = kwargs
+        self.target_doc = docstring
+
+    def _call_client(self, message: str, future: Future):
+        with self.client as client:
+            client.send(message)
+            message = client.recv()
+        result = parse_rpc_response(message)
+        if isinstance(result, Exception):
+            future.set_exception(result)
+            return
+        future.set_result(result)
+
+    def call_async(self, *args, **kwargs) -> Future:
+        """
+        Start a new thread to call the target.
+
+        It returns a Future object with result/done methods.
+
+        :return Future: Future object with result
+        """
+
+        message = format_rpc_command(self.target, *args, **kwargs)
+        future = Future()
+
+        #FIXME This is smelly... how is it usually done? Maybe use the runner
+        # spawners to do it, but then issue #12 should be done first.
+        t = threading.Thread(target=self._call_client, args=(message, future))
+        t.daemon = True
+        t.start()
+
+        return future
+
+    @property
+    def info(self):
+        return f"""
+        RPC Target Object.
+        > Target: {self.target}
+        > Target's Arguments: {self.target_args}
+        > Target's Key Arguments: {self.target_kwargs}
+        > Target's Docstring: {self.target_doc}
+        """
+
+    def __call__(self, *args, **kwargs):
+        future = self.call_async(*args, **kwargs)
+        return future.result()
+
+    def __repr__(self):
+        return f"RPC<{self.target}>"
+
+    def __str__(self):
+        return self.__repr__()
+
+
+class RPCProxy:
+    """
+    Injected Dependency that populates itself based on the list of targets
+    from the connected RPC server.
+
+    The class object attributes are the RPC Server targets instantiated as a
+    RPCTarget class object.
+
+    """
+    def __init__(self, client, targets):
+        self._targets = []
+        for target in targets:
+            target_obj = RPCTarget(client, **target)
+            self._targets.append(target_obj)
+            setattr(self, target['target'], target_obj)
+
+    @property
+    def targets(self):
+        return self._targets
+
+
+class RPCDependencyMixin:
+    """
+    Mixin with methods to communicate with RPCManager and exposing the
+    available commands.
+
+    It expects a client_class that implements RPCClient which will be used as a
+    context manager for each connection.
+    """
+
+    client_class: RPCClient = None
+
+    def get_client_kwargs(self):
+        """
+        Key arguments to be passed to the client_class instantiation
+        :return dict:
+        """
+        return {}
+
+    def get_client(self):
+        """
+        Returns an instance of client_class.
+        :return RPCClient: The Client object
+        """
+        return self.client_class(**self.get_client_kwargs())
+
+    def parse_response(self, response):
+        """
+        Parses the response from the RPC Manager.
+        :param str response: RPC Manager Response String
+        :return dict|list: Response Data.
+        """
+        if isinstance(response, str):
+            return json.loads(response).get('data', None)
+        return response
+
+    def make_call(self, message, wait_response=True):
+        """
+        Call the RPC Manager using the instantiated client.
+
+        :param dict|str message: Message to be Sent.
+        :param bool wait_response: If True, then we wait for a reply.
+        :return json|list: Manager Response
+        """
+        if isinstance(message, dict):
+            message = json.dumps(message)
+        with self.get_client() as client:
+            client.send(message)
+            return self.parse_response(client.recv()) if wait_response else None
+
+    def list_targets(self):
+        """
+        Call __list_targets__ command. As the name suggests, it retrieves all
+        registered RPC targets in the connected server.
+        :return list: List of Targets
+        """
+        message = format_rpc_command('__list_targets__')
+        response = self.make_call(message)
+        return response
+
+    def get_target(self, target):
+        """
+        Call __get_target__(target) command.
+
+        It returns a single target information.
+
+        :param str target: The target name.
+        :return dict: Target information
+        """
+        message = format_rpc_command('__get_target__', target)
+        response = self.make_call(message)
+        return response
+
+
+class RPCDependency(RPCDependencyMixin, Dependency):
+    """
+    Dependency Provider that injects a RPCProxy into the worker's target.
+
+    """
+    def setup(self):
+        super(RPCDependencyMixin, self).setup()
+        self.targets = self.list_targets() or []
+
+    def get_dependency(self, worker):
+        return RPCProxy(self.get_client(), self.targets)
