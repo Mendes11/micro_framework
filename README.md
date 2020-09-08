@@ -49,9 +49,12 @@ https://python-micro-framework.readthedocs.io/en/latest/
 import logging
 from micro_framework.runner import Runner
 from micro_framework.routes import Route, CallbackRoute
+from micro_framework.entrypoints import TimeEntrypoint
 from micro_framework.amqp.entrypoints import EventListener
 from micro_framework.retry import AsyncBackOff, BackOffData
 from micro_framework.amqp.dependencies import Producer 
+from micro_framework.websocket.entrypoints import WebSocketEntrypoint
+from micro_framework.websocket.dependencies import WebSocketRPCClient
 from tasks import test2
 
 config = {
@@ -59,7 +62,9 @@ config = {
     'MAX_WORKERS': 3,
     'SERVICE_NAME': 'my_service',
     'MAX_TASKS_PER_CHILD': 2, # currently for process WORKER_MODE only 
-    'WORKER_MODE': 'process'
+    'WORKER_MODE': 'process',
+    'WEBSOCKET_IP': '0.0.0.0', # Default value
+    'WEBSOCKET_PORT': 8765,  # Default Value
 }
 
 logger = logging.getLogger(__name__)
@@ -97,6 +102,17 @@ routes = [
             max_retries=5, interval=10000, exception_list=None
         ),
     ),
+    # We support RPC  over websockets:
+    Route(
+    'tasks.websocket_task',
+    entrypoint=WebSocketEntrypoint(),
+    ),
+    Route(
+    'tasks.websocket_caller',
+    entrypoint=TimeEntrypoint(10),
+    dependencies={'service_rpc': WebSocketRPCClient('127.0.0.1', 8765)} # Service Address to connect the client
+    )
+
 ]
 
 if __name__ == '__main__':
@@ -109,6 +125,7 @@ if __name__ == '__main__':
 * tasks.py
 ```python
 from micro_framework.amqp.dependencies import Producer
+import time
 
 def test(payload, producer):
     # business_logic
@@ -126,6 +143,30 @@ class Class:
     def class_method(self, payload, retry):
         # business_logic
         self.producer('event_name', {})
+
+
+# WebSocket RPC Examples
+def websocket_task(arg1, arg2):
+    """
+    My Docstring
+    :param arg1:
+    :param arg2:
+    :return:
+    """
+    print(f"Websocket Task Called with {arg1} and {arg2}")
+    time.sleep(3)
+    return f"{arg1} - {arg2}"
+
+
+def websocket_caller(reference, service_rpc):
+    print(service_rpc.targets)
+    print(service_rpc.websocket_task.info)
+    async_response = service_rpc.websocket_task.call_async('argument1', 'argument2')
+    print("This is an async response future", async_response)
+    response = service_rpc.websocket_task('argument3', 'argument4')
+    print('Sync Response: ', response)
+    print("Async Response result will lock until response: ", async_response.result())
+
 ```
 
 
