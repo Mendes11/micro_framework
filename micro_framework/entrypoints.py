@@ -44,18 +44,19 @@ class TimeEntrypoint(Entrypoint):
         self.runner.spawn_extension(self, self.run)
 
     def run(self):
+        last_time = timer()
         while self.running:
-            t1 = timer()
+            elapsed_time = timer() - last_time
+            sleep_time = self.interval - elapsed_time
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            last_time = timer()
             entry_id = uuid.uuid4()
             now = datetime.utcnow()
             try:
                 self.call_route(entry_id, now.isoformat())
             except (ExtensionIsStopped, PoolStopped):
                 pass
-            elapsed_time = timer() - t1
-            sleep_time = self.interval - elapsed_time
-            if sleep_time > 0:
-                time.sleep(sleep_time)
 
     def stop(self):
         self.running = False
