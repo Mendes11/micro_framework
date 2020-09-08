@@ -1,11 +1,10 @@
-import inspect
 from functools import partial
 
 from micro_framework.entrypoints import Entrypoint
 from micro_framework.websocket.manager import WebSocketManager
 
 
-class BaseWebSocketEntrypoint(Entrypoint):
+class WebSocketEntrypoint(Entrypoint):
     manager = WebSocketManager()
 
     async def handle_message(self, websocket, *args, **kwargs):
@@ -17,16 +16,22 @@ class BaseWebSocketEntrypoint(Entrypoint):
         :param message:
         :return:
         """
-        func = partial(self.call_route, websocket, *args, **kwargs)
         self.runner.event_loop.run_in_executor(
-            self.runner.extension_spawner, func
+            self.runner.extension_spawner,
+            func=partial(self.call_route, websocket, *args, **kwargs)
         )
 
     def on_finished_route(self, entry_id, worker):
-        # TODO Handle exception
-        message = {'result': worker.result}
-        self.manager.send_to_client(entry_id, message)
+        self.manager.send_to_client(
+            entry_id, data=worker.result, exception=worker.exception
+        )
+
+    def on_failure(self, entry_id):
+        exception = FrameWorkException("RPC Server failed unexpectedly.")
+        self.manager.send_to_client(
+            entry_id, data=None, exception=exception
+        )
 
     def setup(self):
-        super(BaseWebSocketEntrypoint, self).setup()
+        super(WebSocketEntrypoint, self).setup()
         self.manager.add_entrypoint(self)

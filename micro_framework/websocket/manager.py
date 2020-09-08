@@ -1,30 +1,30 @@
-import json
+import asyncio
 import logging
 
-import nest_asyncio
-
-from micro_framework.rpc import RPCManagerMixin, AsyncRPCManagerMixin
+from micro_framework.rpc import AsyncRPCManagerMixin, format_rpc_response
 from micro_framework.websocket.server import WebSocketServer
 
 logger = logging.getLogger(__name__)
 
 
 class WebSocketManager(AsyncRPCManagerMixin, WebSocketServer):
+    """
+    AsyncRPCManager implementation using WebSockets.
+
+    It starts a WebSocketServer that listens to connections and handles
+    messages using the format expected by RPCManagerMixin.
+
+    """
     def setup(self):
         logger.debug("Setup WebSocket Manager.")
 
         self.ip = self.runner.config.get('WEBSOCKET_IP', '0.0.0.0')
         self.port = self.runner.config.get("WEBSOCKET_PORT", 8765)
-        self.event_loop = self.runner.event_loop
-
-        # Patching event_loop to allow the call in send_to_client from the
-        # executor that returned.
-        nest_asyncio.apply(self.event_loop)
 
     def start(self):
         logger.debug("Starting WebSocket Manager.")
+        self.event_loop = self.runner.event_loop
         self.start_server(self.event_loop, self.ip, self.port)
-        logger.info(f"Started WebSocketManager at {self.ip}:{self.port}")
 
     async def message_received(self, websocket, message):
         response = await self.consume_message(websocket, message)
@@ -44,6 +44,8 @@ class WebSocketManager(AsyncRPCManagerMixin, WebSocketServer):
         :param message: Response
         :return:
         """
-        message = self.format_rpc_response(data, exception)
+        message = format_rpc_response(data, exception)
         # Re-enter the event loop to send the response to the client.
-        self.event_loop.run_until_complete(self.send(websocket, message))
+        asyncio.run_coroutine_threadsafe(
+            self.send(websocket, message), self.event_loop
+        )
