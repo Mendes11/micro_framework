@@ -1,4 +1,3 @@
-from micro_framework.dependencies import Dependency
 from micro_framework.rpc import RPCDependency
 from micro_framework.websocket.client import WebSocketClient
 
