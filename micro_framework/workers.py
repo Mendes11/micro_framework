@@ -75,6 +75,7 @@ class Worker:
             self.call_dependencies(
                 self._class_dependencies, 'after_call', self, self.result, exc
             )
+            return self.result
 
         self.call_dependencies(
             self._dependencies, 'after_call', self, self.result, None

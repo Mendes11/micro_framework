@@ -1,7 +1,9 @@
 # TODO get configurations somehow
+import asyncio
 import inspect
 import logging.config
 import time
+from asyncio import get_event_loop
 
 from micro_framework.entrypoints import Entrypoint
 from micro_framework.extensions import Extension
@@ -79,6 +81,7 @@ class Runner:
             self.extra_extensions.add(extension)
 
     def start(self):
+        self.event_loop = asyncio.get_event_loop()
         logger.info(
             f"Starting Runner with {self.config['MAX_WORKERS']}"
             f" {self.worker_mode} workers"
@@ -95,20 +98,25 @@ class Runner:
         self._call_extensions_action('setup', extension_set=self.extra_extensions)
 
         self._call_extensions_action('start')
-        self.is_running = True
-        while self.is_running:
-            try:
-                time.sleep(1)
-            except KeyboardInterrupt:
-                self.stop()
-            except Exception:
-                self.stop()
-                raise
+        try:
+            self.event_loop.run_forever()
+        except KeyboardInterrupt:
+            self.stop()
+        except Exception:
+            self.stop()
+            raise
         logger.info("Runner stopped")
 
     def stop(self, *args):
         self.is_running = False
+
         logger.info("Stopping all extensions and workers")
+
+        # Summary: Please Stop!!
+        self.event_loop.call_soon_threadsafe(self.event_loop.stop)
+        self.event_loop.stop()
+        self.event_loop.close()
+
         # Stopping Entrypoints First
         self._call_extensions_action('stop', extension_set=self.routes)
         # Stop Workers
@@ -120,6 +128,7 @@ class Runner:
         # Stop running extensions
         logger.debug("Stopping any still running extensions thread")
         self.extension_spawner.stop(wait=False)
+        self.event_loop.close()
 
     def spawn_worker(self, worker, *fn_args, callback=None, **fn_kwargs):
         """
