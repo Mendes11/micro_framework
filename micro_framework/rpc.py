@@ -73,22 +73,42 @@ def parse_rpc_response(message):
     return response.get('data')
 
 
-class RPCClient(ABC):
+class RPCConnection(ABC):
+    """
+    Abstract Class representing a connection handler.
+
+    The RPCMixin and RPCTarget will use it as a context manager to open a new
+    connection and communicate.
+    """
+
     @abstractmethod
     def __enter__(self):
+        """
+        Return a connection that implements the methods send and rcv.
+        :return:
+        """
         ...
 
     @abstractmethod
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        This method should close the opened connection.
+        """
         ...
 
-    @abstractmethod
-    def send(self, message):
-        ...
 
-    @abstractmethod
-    def recv(self):
-        ...
+class RPCClient:
+    """
+    Client that
+    """
+
+    def __init__(self, connection_class, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        self.connection_class = connection_class
+
+    def get_connection(self):
+        return self.connection_class(*self.args, **self.kwargs)
 
 
 class RPCManagerMixin(Extension):
@@ -310,17 +330,19 @@ class RPCTarget:
     It exposes methods to call the target synchronously or asynchronously.
 
     """
-    def __init__(self, client: RPCClient, target, *args, docstring=None, **kwargs):
+    def __init__(self, client: RPCClient, target, args=None, kwargs=None,
+                 docstring=None):
         self.client = client
         self.target = target
         self.target_args = args
         self.target_kwargs = kwargs
         self.target_doc = docstring
 
-    def _call_client(self, message: str, future: Future):
-        with self.client as client:
-            client.send(message)
-            message = client.recv()
+    @staticmethod
+    def _call_client(message: str, client: RPCClient, future: Future):
+        with client.get_connection() as connection:
+            connection.send(message)
+            message = connection.recv()
         result = parse_rpc_response(message)
         if isinstance(result, Exception):
             future.set_exception(result)
@@ -341,7 +363,9 @@ class RPCTarget:
 
         #FIXME This is smelly... how is it usually done? Maybe use the runner
         # spawners to do it, but then issue #12 should be done first.
-        t = threading.Thread(target=self._call_client, args=(message, future))
+        t = threading.Thread(
+            target=self._call_client, args=(message, self.client, future)
+        )
         t.daemon = True
         t.start()
 
@@ -350,11 +374,11 @@ class RPCTarget:
     @property
     def info(self):
         return f"""
-        RPC Target Object.
-        > Target: {self.target}
-        > Target's Arguments: {self.target_args}
-        > Target's Key Arguments: {self.target_kwargs}
-        > Target's Docstring: {self.target_doc}
+RPC Target Object.
+> Target: {self.target}
+> Target's Arguments: {self.target_args}
+> Target's Key Arguments: {self.target_kwargs}
+> Target's Docstring: \n{self.target_doc}
         """
 
     def __call__(self, *args, **kwargs):
@@ -398,9 +422,9 @@ class RPCDependencyMixin:
     context manager for each connection.
     """
 
-    client_class: RPCClient = None
+    connection_class: RPCConnection = None
 
-    def get_client_kwargs(self):
+    def get_connection_kwargs(self):
         """
         Key arguments to be passed to the client_class instantiation
         :return dict:
@@ -412,7 +436,7 @@ class RPCDependencyMixin:
         Returns an instance of client_class.
         :return RPCClient: The Client object
         """
-        return self.client_class(**self.get_client_kwargs())
+        return RPCClient(self.connection_class, **self.get_connection_kwargs())
 
     def parse_response(self, response):
         """
@@ -434,7 +458,7 @@ class RPCDependencyMixin:
         """
         if isinstance(message, dict):
             message = json.dumps(message)
-        with self.get_client() as client:
+        with self.get_client().get_connection() as client:
             client.send(message)
             return self.parse_response(client.recv()) if wait_response else None
 
