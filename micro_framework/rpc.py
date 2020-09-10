@@ -195,14 +195,26 @@ class RPCManagerMixin(Extension):
         """
         target = entrypoint.route.target
         if inspect.isclass(target):
-            target_id = f"{target.__name__}.{entrypoint.route.method_name}"
-            target = getattr(target, entrypoint.route.method_name)
-        elif inspect.isfunction(target):
+            # ID is ClassName.method_name
             target_id = target.__name__
+            target = getattr(target, '__call__')
+            if entrypoint.route.method_name:
+                # User set method_name, so we use it instead of __call__
+                target_id = f"{target.__name__}.{entrypoint.route.method_name}"
+                target = getattr(target, entrypoint.route.method_name)
+
+        elif inspect.isfunction(target):
+            # ID is function_name
+            target_id = target.__name__
+
         else:
-            # str path
+            # Target is a str path
+            target_id = target.split('.')[-1]
+            if entrypoint.route.method_name:
+                # it has a method_name, so we add it to the target_id
+                target_id += f'.{entrypoint.route.method_name}'
             return {
-                'target': target.split('.')[-1],
+                'target': target_id,
                 'args': 'not_available',
                 'kwargs': 'not_available',
                 'docstring': 'not_available'
@@ -363,6 +375,8 @@ class RPCTarget:
 
         #FIXME This is smelly... how is it usually done? Maybe use the runner
         # spawners to do it, but then issue #12 should be done first.
+        # TODO Change to executor to use the submit method and it will
+        #  automatically handle the Future class.
         t = threading.Thread(
             target=self._call_client, args=(message, self.client, future)
         )
@@ -401,16 +415,36 @@ class RPCProxy:
     RPCTarget class object.
 
     """
-    def __init__(self, client, targets):
-        self._targets = []
+    def __init__(self, client, targets, name=None):
+        self._targets = set()
+        self.client = client
+        self.name = name
+
         for target in targets:
-            target_obj = RPCTarget(client, **target)
-            self._targets.append(target_obj)
-            setattr(self, target['target'], target_obj)
+            self._targets.add(self.add_target(target))
+
+    def add_target(self, target, nested_name=None):
+        target_name = nested_name or target['target']
+        target_name, *nested = target_name.split('.')
+        if nested:
+            obj = getattr(self, target_name, RPCProxy(
+                self.client, [], name=target_name))
+            obj.add_target(target, '.'.join(nested))
+        else:
+            obj = RPCTarget(self.client, **target)
+        setattr(self, target_name, obj)
+        return obj
 
     @property
     def targets(self):
         return self._targets
+
+    def __repr__(self):
+        name = self.name or 'Server'
+        return f"RPC<{name}>"
+
+    def __str__(self):
+        return self.__repr__()
 
 
 class RPCDependencyMixin:
