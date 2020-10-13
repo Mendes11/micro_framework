@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class PrometheusMetricServer(Extension):
     def setup(self):
         self.config = self.runner.config['METRICS']
+        self.enabled = self.runner.config['ENABLE_METRICS']
 
     def start(self):
         """
@@ -20,13 +21,20 @@ class PrometheusMetricServer(Extension):
         except that we use our runner to spawn the task instead of a Thread
         alone.
         """
-        app = make_wsgi_app(REGISTRY)
-        httpd = make_server(
-            self.config['HOST'], self.config['PORT'], app, ThreadingWSGIServer,
-            handler_class=_SilentHandler
-        )
-        self.runner.spawn_extension(self, httpd.serve_forever)
-        logger.info("Prometheus Metrics Server Started")
+        if self.enabled:
+            app = make_wsgi_app(REGISTRY)
+            httpd = make_server(
+                self.config['HOST'],
+                self.config['PORT'],
+                app,
+                ThreadingWSGIServer,
+                handler_class=_SilentHandler
+            )
+            self.runner.spawn_extension(self, httpd.serve_forever)
+            logger.info(
+                "Prometheus Metrics Server Started\n\t-Listening at"
+                f" {self.config['HOST']}:{self.config['PORT']}"
+            )
 
 
 # Runner Metrics

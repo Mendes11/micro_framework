@@ -5,7 +5,8 @@ DEFAULT_CONFIG = dict(
     WORKER_MODE='process',
     MAX_TASKS_PER_CHILD=None,
     AMPQ_URI='amqp://guest:guest@localhost:5672',
-    METRICS={
+    ENABLE_METRICS=False, # This is Preferable to avoid any port collision
+    METRICS = {
         'HOST': '0.0.0.0',
         'PORT': 8000,
     },
