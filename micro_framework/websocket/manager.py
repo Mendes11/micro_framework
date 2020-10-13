@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from micro_framework.rpc import AsyncRPCManagerMixin, format_rpc_response
+from micro_framework.websocket.metrics import active_connections
 from micro_framework.websocket.server import WebSocketServer
 
 logger = logging.getLogger(__name__)
@@ -18,14 +19,22 @@ class WebSocketManager(AsyncRPCManagerMixin, WebSocketServer):
     def setup(self):
         logger.debug("Setup WebSocket Manager.")
 
-        self.ip = self.runner.config.get('WEBSOCKET_IP', '0.0.0.0')
-        self.port = self.runner.config.get("WEBSOCKET_PORT", 8765)
+        self.ip = self.runner.config['WEBSOCKET_IP']
+        self.port = self.runner.config["WEBSOCKET_PORT"]
 
     def start(self):
         logger.debug("Starting WebSocket Manager.")
         self.event_loop = self.runner.event_loop
         self.start_server(self.event_loop, self.ip, self.port)
-
+    
+    async def register_client(self, websocket):
+        active_connections.inc()
+        return super(WebSocketManager, self).register_client(websocket)
+    
+    async def unregister_client(self, websocket):
+        active_connections.dec()
+        return super(WebSocketManager, self).unregister_client(websocket)
+    
     async def message_received(self, websocket, message):
         response = await self.consume_message(websocket, message)
         if response:
