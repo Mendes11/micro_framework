@@ -29,11 +29,11 @@ class WebSocketManager(AsyncRPCManagerMixin, WebSocketServer):
     
     async def register_client(self, websocket):
         active_connections.inc()
-        return super(WebSocketManager, self).register_client(websocket)
+        await super(WebSocketManager, self).register_client(websocket)
     
     async def unregister_client(self, websocket):
         active_connections.dec()
-        return super(WebSocketManager, self).unregister_client(websocket)
+        await super(WebSocketManager, self).unregister_client(websocket)
     
     async def message_received(self, websocket, message):
         response = await self.consume_message(websocket, message)
