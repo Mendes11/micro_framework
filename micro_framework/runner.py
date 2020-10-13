@@ -2,9 +2,13 @@
 import asyncio
 import inspect
 import logging.config
+import signal
 import time
 from asyncio import get_event_loop
 
+from aiohttp.web_runner import GracefulExit
+
+from micro_framework.config import FrameworkConfig
 from micro_framework.entrypoints import Entrypoint
 from micro_framework.extensions import Extension
 from micro_framework.spawners.multiprocess import ProcessSpawner, \
@@ -29,16 +33,16 @@ logger = logging.getLogger(__name__)
 
 class Runner:
     def __init__(self, routes, config):
-        self.config = config
+        self.config = FrameworkConfig(config)
         self.routes = routes
-        self.worker_mode = config.get('WORKER_MODE', 'thread')
+        self.worker_mode = self.config['WORKER_MODE']
         if self.worker_mode == 'process':
             self.spawner = SPAWNERS[self.worker_mode](
-                config['MAX_WORKERS'], config['MAX_TASKS_PER_CHILD']
+                self.config['MAX_WORKERS'], self.config['MAX_TASKS_PER_CHILD']
             )
         else:
             self.spawner = SPAWNERS[self.worker_mode](
-                config['MAX_WORKERS']
+                self.config['MAX_WORKERS']
             )
         self.extension_spawner = ThreadSpawner()
         self.is_running = False
@@ -100,7 +104,7 @@ class Runner:
         self._call_extensions_action('start')
         try:
             self.event_loop.run_forever()
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, GracefulExit, asyncio.CancelledError):
             self.stop()
         except Exception:
             self.stop()
@@ -125,9 +129,11 @@ class Runner:
         self.extension_spawner.stop(wait=False)
 
         # Summary: Please Stop!!
-        self.event_loop.call_soon_threadsafe(self.event_loop.stop)
-        self.event_loop.stop()
-        self.event_loop.close()
+        for task in asyncio.Task.all_tasks():
+            task.cancel()
+        # self.event_loop.call_soon_threadsafe(self.event_loop.stop)
+        # self.event_loop.stop()
+        # self.event_loop.close()
 
     def spawn_worker(self, worker, *fn_args, callback=None, **fn_kwargs):
         """
@@ -171,9 +177,10 @@ class Runner:
         by an error or simply shutting down.
         """
         if future.exception():
-            print("Exception in thread.")
-            self.stop()
             raise future.exception()
+            # logger.error(f"Exception in thread: \n{future.exception()}")
+            # self.stop()
+            # raise future.exception()
 
 
 def find_extensions(cls):
