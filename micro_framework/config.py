@@ -1,19 +1,16 @@
 from collections import UserDict
 
 DEFAULT_CONFIG = dict(
-
     MAX_WORKERS=3,
     WORKER_MODE='process',
     MAX_TASKS_PER_CHILD=None,
     AMPQ_URI='amqp://guest:guest@localhost:5672',
-    HTTP_SERVER={
-        'host': '0.0.0.0',
-        'port': 8000
+    METRICS={
+        'HOST': '0.0.0.0',
+        'PORT': 8000,
     },
     WEBSOCKET_IP='0.0.0.0',
     WEBSOCKET_PORT=8765,
-    EXPORT_METRICS=True,
-    METRICS_PATH='/metrics/'
 )
 
 
