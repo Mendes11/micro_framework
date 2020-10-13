@@ -2,19 +2,18 @@
 import asyncio
 import inspect
 import logging.config
-import signal
-import time
-from asyncio import get_event_loop
+from timeit import default_timer
 
 from aiohttp.web_runner import GracefulExit
 
 from micro_framework.config import FrameworkConfig
 from micro_framework.entrypoints import Entrypoint
 from micro_framework.extensions import Extension
+from micro_framework.metrics import PrometheusMetricServer, tasks_counter, \
+    tasks_number, tasks_failures_counter, tasks_duration, info
 from micro_framework.spawners.multiprocess import ProcessSpawner, \
     ProcessPoolSpawner
 from micro_framework.spawners.thread import ThreadSpawner, ThreadPoolSpawner
-
 
 # Greedy Spawner means that the runner will consume all received tasks so far
 # when a stop signal is sent.
@@ -22,17 +21,42 @@ from micro_framework.spawners.thread import ThreadSpawner, ThreadPoolSpawner
 # The non-greedy spawner will finish the current tasks and skip all pending
 # ones. (Entrypoints with acknowledge are good candidates for this)
 SPAWNERS = {
-    'thread': ThreadSpawner, # Will
+    'thread': ThreadSpawner,  # Will
     'process': ProcessSpawner,
-    'greedy_thread': ThreadPoolSpawner, # Will consume all received tasks on stop
-    'greedy_process': ProcessPoolSpawner, # Will consume all received tasks
+    'greedy_thread': ThreadPoolSpawner,
+    # Will consume all received tasks on stop
+    'greedy_process': ProcessPoolSpawner,  # Will consume all received tasks
 }
 
 logger = logging.getLogger(__name__)
 
 
+def _spawn_worker(spawner, worker, *args, **kwargs):
+    """
+    This function spawns a new task using the spawner and handle the
+    task metrics update.
+    """
+    # Increase metrics counter
+    tasks_counter.inc()
+    tasks_number.inc()
+    start = default_timer()
+    future = spawner(worker.run, *args, **kwargs)
+
+    def on_worker_finished(future):
+        worker = future.result()
+        tasks_number.dec()
+        if worker.exception is not None:
+            tasks_failures_counter.inc()
+        duration = default_timer() - start
+        tasks_duration.observe(duration)
+
+    future.add_done_callback(on_worker_finished)
+
+    return future
+
+
 class Runner:
-    def __init__(self, routes, config):
+    def __init__(self, routes, config, metric_server=None):
         self.config = FrameworkConfig(config)
         self.routes = routes
         self.worker_mode = self.config['WORKER_MODE']
@@ -52,7 +76,21 @@ class Runner:
         self.entrypoints = set()
         self.extra_extensions = set()
         self._find_extensions()
+
+        # Metric Extension Binding
+        if metric_server is None:
+            metric_server = PrometheusMetricServer()
+        self.metric_server = metric_server
+        self.metric_server.bind(self)
+        self.register_extension(self.metric_server)
         logger.debug(f"Extensions: {self.extensions}")
+        info.info(
+            {
+                'max_workers': str(self.config['MAX_WORKERS']),
+                'worker_mode': self.config['WORKER_MODE'],
+                'max_tasks_per_child': str(self.config['MAX_TASKS_PER_CHILD'])
+            }
+        )
 
     def _call_extensions_action(self, action, extension_set=None):
         if extension_set is None:
@@ -99,7 +137,8 @@ class Runner:
         # Setup Routes first then entrypoints last and extra extensions last.
         self._call_extensions_action('setup', extension_set=self.routes)
         self._call_extensions_action('setup', extension_set=self.entrypoints)
-        self._call_extensions_action('setup', extension_set=self.extra_extensions)
+        self._call_extensions_action('setup',
+                                     extension_set=self.extra_extensions)
 
         self._call_extensions_action('start')
         try:
@@ -143,9 +182,8 @@ class Runner:
         :param fn_args: Arguments of the function to be called.
         :return Future: A Future object of the task.
         """
-        future = self.spawner.spawn(
-            worker.run, callback, *fn_args, **fn_kwargs
-        )
+        future = _spawn_worker(
+            self.spawner.spawn, worker, callback, *fn_args, **fn_kwargs)
         self.spawned_workers[future] = worker
         return future
 
