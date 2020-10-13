@@ -26,7 +26,7 @@ class ConsumerManager(Extension, ConsumerMixin):
 
     @property
     def amqp_uri(self):
-        return self.runner.config.get('AMQP_URI')
+        return self.runner.config['AMQP_URI']
 
     def on_connection_error(self, exc, interval):
         logger.info(
@@ -61,8 +61,8 @@ class ConsumerManager(Extension, ConsumerMixin):
             self._consumers.append(
                 Consumer(
                     queues=[queue],
-                    callbacks=[callback],no_ack=False,
-                    prefetch_count=self.runner.config.get("MAX_WORKERS", 1)
+                    callbacks=[callback], no_ack=False,
+                    prefetch_count=self.runner.config["MAX_WORKERS"]
                 )
             )
         return self._consumers

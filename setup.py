@@ -4,7 +4,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     name='micro-framework',
     url='https://github.com/Mendes11/micro_framework',
-    version='1.3.2',
+    version='1.4.0',
     description='Framework to create CPU or IO bound microservices.',
     long_description= 'file: README.md',
     author = 'Rafael Mendes Pacini Bachiega',
@@ -17,6 +17,7 @@ setuptools.setup(
     'Programming Language :: Python :: 3.7',
     'Programming Language :: Python :: 3.8'],
     install_requires=[
-        "kombu>=4.6.8", "websockets==8.1", "websocket-client==0.57.0"
+        "kombu>=4.6.8", "websockets==8.1", "websocket-client==0.57.0",
+        "prometheus-client==0.8.0"
     ],
 )

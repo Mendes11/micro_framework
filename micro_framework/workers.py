@@ -39,6 +39,7 @@ class Worker:
         self._translators = translators or []
         self.result = None
         self.exception = None
+        self.finished = False
         self._meta = _meta or {} # Content shared by extensions
 
     def get_callable(self):
@@ -130,6 +131,7 @@ class Worker:
 
         fn_kwargs = {**self.translated_kwargs, **dependencies}
         self.call_task(function, *self.translated_args, **fn_kwargs)
+        self.finished = True
         return self
 
 
