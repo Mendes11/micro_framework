@@ -17,8 +17,22 @@ class Entrypoint(Extension):
         self.route = route
 
     def call_route(self, entry_id, *args, _meta=None, **kwargs):
+        """
+        Call the binded Route to start a new worker with the received content
+        from the entrypoint.
+
+        It returns the Instantiated Worker.
+
+        :param entry_id:
+        :param args:
+        :param _meta:
+        :param kwargs:
+        :return:
+        """
         try:
-            self.route.start_route(entry_id, *args, _meta=_meta, **kwargs)
+            return self.route.start_route(
+                entry_id, *args, _meta=_meta, **kwargs
+            )
         except PoolStopped:  # Unexpected error and we want to
             logger.info("New entry called when pool was already "
                         "signalled to stop.")
