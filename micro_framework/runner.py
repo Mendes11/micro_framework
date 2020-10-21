@@ -4,7 +4,6 @@ import inspect
 import logging.config
 from timeit import default_timer
 
-from aiohttp.web_runner import GracefulExit
 
 from micro_framework.config import FrameworkConfig
 from micro_framework.entrypoints import Entrypoint
@@ -143,7 +142,7 @@ class Runner:
         self._call_extensions_action('start')
         try:
             self.event_loop.run_forever()
-        except (KeyboardInterrupt, GracefulExit, asyncio.CancelledError):
+        except (KeyboardInterrupt, asyncio.CancelledError):
             self.stop()
         except Exception:
             self.stop()
