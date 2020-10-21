@@ -4,7 +4,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     name='micro-framework',
     url='https://github.com/Mendes11/micro_framework',
-    version='1.4.1',
+    version='1.4.2',
     description='Framework to create CPU or IO bound microservices.',
     long_description= 'file: README.md',
     author = 'Rafael Mendes Pacini Bachiega',
