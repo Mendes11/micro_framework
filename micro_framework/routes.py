@@ -46,8 +46,6 @@ class Route(Extension):
 
     def worker_result(self, entry_id, future):
         logger.debug(f"{self} Received a worker result.")
-        # Cleaning runner
-        self.runner.spawned_workers.pop(future)
         if future.exception():
             # Unhandled exception propagate it to kill thread.
             raise future.exception()
@@ -135,7 +133,6 @@ class CallbackRoute(Route):
 
     def callback_worker_result(self, entry_id, future):
         logger.debug(f"{self} received a callback worker result.")
-        self.runner.spawned_workers.pop(future)
         if future.exception():
             raise future.exception()
         callback_worker = future.result()
