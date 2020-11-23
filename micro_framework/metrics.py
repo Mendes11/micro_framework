@@ -23,19 +23,21 @@ class PrometheusMetricServer(Extension):
         """
         if self.enabled:
             app = make_wsgi_app(REGISTRY)
-            httpd = make_server(
+            self.httpd = make_server(
                 self.config['HOST'],
                 self.config['PORT'],
                 app,
                 ThreadingWSGIServer,
                 handler_class=_SilentHandler
             )
-            self.runner.spawn_extension(self, httpd.serve_forever)
             logger.info(
                 "Prometheus Metrics Server Started\n\t-Listening at"
                 f" {self.config['HOST']}:{self.config['PORT']}"
             )
+            self.httpd.serve_forever()
 
+    def stop(self):
+        self.httpd.shutdown()
 
 # Runner Metrics
 

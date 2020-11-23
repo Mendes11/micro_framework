@@ -18,7 +18,7 @@ class WebSocketEntrypoint(Entrypoint):
         :return:
         """
         self.runner.event_loop.run_in_executor(
-            self.runner.extension_spawner,
+            None,
             func=partial(self.call_route, websocket, *args, **kwargs)
         )
 

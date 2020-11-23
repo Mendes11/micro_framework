@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from concurrent.futures._base import wait
 from threading import Lock
@@ -47,7 +48,6 @@ class ConsumerManager(Extension, ConsumerMixin):
     def stop(self):
         logger.debug("AMQP ConsumerManager is stopping")
         self.should_stop = True
-        wait([self.run_thread])
         self.connection.close()
         logger.debug("AMQP ConsumerManager stopped.")
 

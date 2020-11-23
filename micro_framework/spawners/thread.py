@@ -15,7 +15,7 @@ def thread_worker(executor, write_queue):
     while True:
         task_id = write_queue.get()
         with executor.shutdown_lock:
-            if executor.shutdown_signal:
+            if executor.shutdown_signal or task_id is None:
                 # Shutdown signal
                 return
         task = executor._tasks.pop(task_id)  # Remove to avoid Mem. inflating.
@@ -23,7 +23,7 @@ def thread_worker(executor, write_queue):
 
 
 class ThreadSpawner(Spawner, _base.Executor):
-    def __init__(self, max_workers=3):
+    def __init__(self, max_workers=3, **kwargs):
         self.max_workers = max_workers
         self._pool = None
         self.ctx = multiprocessing.get_context()
@@ -85,6 +85,11 @@ class ThreadSpawner(Spawner, _base.Executor):
 
 
 class ThreadPoolSpawner(Spawner, ThreadPoolExecutor):
+    def __init__(self, max_workers=None, thread_name_prefix='',
+                 initializer=None, initargs=(), **kwargs):
+        super(ThreadPoolSpawner, self).__init__(
+            max_workers, thread_name_prefix, initializer, initargs
+        )
 
     def shutdown(self, wait: bool = ...) -> None:
         logger.info("Greedy Worker shutdown initiated, wait until all pending "

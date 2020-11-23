@@ -55,7 +55,7 @@ def process_worker(call_queue, result_queue, max_tasks):
 
 
 class ProcessSpawner(Spawner, _base.Executor):
-    def __init__(self, max_workers=3, max_tasks_per_child=None):
+    def __init__(self, max_workers=3, max_tasks_per_child=None, **kwargs):
         self.max_workers = max_workers
         self.max_tasks_per_child = max_tasks_per_child
         self._pool = []
@@ -140,7 +140,7 @@ class ProcessSpawner(Spawner, _base.Executor):
             self.shutdown_pool = True
         self.read_queue.put(None)
         self._queue_handler_task.join()
-        logger.debug("Pool Stopped.")
+        logger.info("Pool Stopped.")
 
     def _send_task_to_process(self):
         while True:
@@ -165,7 +165,11 @@ class ProcessSpawner(Spawner, _base.Executor):
             return False
         logger.debug("Received Message is a worker response")
         task_id, result, exc, pid = result
-        future = self._tasks.pop(task_id).future
+        try:
+            future = self._tasks.pop(task_id).future
+        except KeyError:
+            # Sometimes this happens when the queue is emptied.
+            return True
         if not exc:
             future.set_result(result)
         else:
@@ -207,7 +211,7 @@ class ProcessSpawner(Spawner, _base.Executor):
 
 class ProcessPoolSpawner(Spawner, ProcessPoolExecutor):
     def __init__(self, max_workers=None, mp_context=None, initializer=None,
-                 initargs=()):
+                 initargs=(), **kwargs):
         if initializer is None:
             initializer = process_initializer
         super(ProcessPoolSpawner, self).__init__(max_workers, mp_context,
