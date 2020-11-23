@@ -265,7 +265,7 @@ class Runner:
         self.spawners = []
         self.config = FrameworkConfig(config)
         if isinstance(contexts[0], Route):
-            contexts = [RunnerContext(route) for route in contexts]
+            contexts = [RunnerContext(contexts)]
         self.contexts = contexts
 
         # Metric Extension Binding
