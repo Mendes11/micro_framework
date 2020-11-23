@@ -16,6 +16,10 @@ class WebSocketManager(AsyncRPCManagerMixin, WebSocketServer):
     messages using the format expected by RPCManagerMixin.
 
     """
+    def __init__(self):
+        super(WebSocketManager, self).__init__()
+        self.started = False
+
     def setup(self):
         logger.debug("Setup WebSocket Manager.")
 
@@ -23,9 +27,17 @@ class WebSocketManager(AsyncRPCManagerMixin, WebSocketServer):
         self.port = self.runner.config["WEBSOCKET_PORT"]
 
     def start(self):
-        logger.debug("Starting WebSocket Manager.")
-        self.runner.spawn_async_extension(self, self.serve(self.ip, self.port))
-    
+        if not self.started:
+            logger.debug("Starting WebSocket Manager.")
+            self.runner.spawn_async_extension(
+                self, self.serve(self.ip, self.port)
+            )
+            self.started = True
+
+    def stop(self):
+        if self.started:
+            self.server.ws_server.close()
+
     async def register_client(self, websocket):
         active_connections.inc()
         await super(WebSocketManager, self).register_client(websocket)

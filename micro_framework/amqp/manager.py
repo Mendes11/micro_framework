@@ -24,6 +24,7 @@ class ConsumerManager(Extension, ConsumerMixin):
         # TODO How to transform it in thread-safe? Substituting threading by
         #  gevent?
         self.message_lock = Lock()
+        self.started = False
 
     @property
     def amqp_uri(self):
@@ -43,13 +44,17 @@ class ConsumerManager(Extension, ConsumerMixin):
         self.connection = self.get_connection()
 
     def start(self):
-        self.run_thread = self.runner.spawn_extension(self, self.run)
+        if not self.started:
+            self.run_thread = self.runner.spawn_extension(self, self.run)
+            self.started = True
 
     def stop(self):
-        logger.debug("AMQP ConsumerManager is stopping")
-        self.should_stop = True
-        self.connection.close()
-        logger.debug("AMQP ConsumerManager stopped.")
+        if self.started:
+            logger.debug("AMQP ConsumerManager is stopping")
+            self.should_stop = True
+            self.connection.close()
+            logger.debug("AMQP ConsumerManager stopped.")
+            self.started = False
 
     def add_entrypoint(self, entrypoint):
         queue = entrypoint.queue
