@@ -13,7 +13,8 @@ from micro_framework.config import FrameworkConfig
 from micro_framework.entrypoints import Entrypoint
 from micro_framework.extensions import Extension
 from micro_framework.metrics import PrometheusMetricServer, tasks_counter, \
-    tasks_number, tasks_failures_counter, tasks_duration, info
+    tasks_number, tasks_failures_counter, tasks_duration, info, \
+    available_workers
 from micro_framework.routes import Route
 from micro_framework.spawners import SPAWNERS
 from micro_framework.spawners.thread import ThreadSpawner
@@ -21,30 +22,6 @@ from micro_framework.spawners.thread import ThreadSpawner
 
 
 logger = logging.getLogger(__name__)
-
-
-def _spawn_worker(spawner, worker, *args, **kwargs):
-    """
-    This function spawns a new task using the spawner and handle the
-    task metrics update.
-    """
-    # Increase metrics counter
-    tasks_counter.inc()
-    tasks_number.inc()
-    start = default_timer()
-    future = spawner(worker.run, *args, **kwargs)
-
-    def on_worker_finished(future):
-        worker = future.result()
-        tasks_number.dec()
-        if worker.exception is not None:
-            tasks_failures_counter.inc()
-        duration = default_timer() - start
-        tasks_duration.observe(duration)
-
-    future.add_done_callback(on_worker_finished)
-
-    return future
 
 
 class RunnerContext:
@@ -58,7 +35,7 @@ class RunnerContext:
     #  scale.
     def __init__(
             self, routes, worker_mode=None, max_workers=None,
-            max_tasks_per_child=None
+            max_tasks_per_child=None, context_metric_label=None
     ):
         assert isinstance(routes, list), "routes must be a list."
         assert len(routes) > 0, "routes must have a length higher than zero."
@@ -72,10 +49,10 @@ class RunnerContext:
         self.spawned_extensions = {}
         self.entrypoints = set()
         self.extra_extensions = set()
-
+        self.metric_label = context_metric_label or f"context_{id(self)}"
         self.bind_extensions()
         self._find_extensions()
-
+        self.running_routes = {}
         logger.debug(f"Extensions: {self.extensions}")
 
     async def bind(self, runner):
@@ -102,13 +79,14 @@ class RunnerContext:
             max_tasks_per_child=self.max_tasks_per_child
         )
 
-        info.info(
+        info.labels(self.metric_label).info(
             {
                 'max_workers': str(self.max_workers),
                 'worker_mode': self.worker_mode,
                 'max_tasks_per_child': str(self.max_tasks_per_child)
             }
         )
+        available_workers.labels(self.metric_label).set(self.available_workers)
 
     def _call_extensions_action(self, action, extension_set=None):
         if extension_set is None:
@@ -190,7 +168,7 @@ class RunnerContext:
         # self.event_loop.stop()
         # self.event_loop.close()
 
-    def spawn_worker(self, worker, *fn_args, callback=None, **fn_kwargs):
+    def spawn_worker(self, route, worker, *fn_args, callback=None, **fn_kwargs):
         """
         Spawn a new worker to execute a function from the calling route.
 
@@ -198,9 +176,27 @@ class RunnerContext:
         :param fn_args: Arguments of the function to be called.
         :return Future: A Future object of the task.
         """
-        future = _spawn_worker(
-            self.spawner.spawn, worker, callback, *fn_args, **fn_kwargs
-        )
+        tasks_counter.labels(self.metric_label, route.metric_label).inc()
+        tasks_number.labels(self.metric_label, route.metric_label).inc()
+        available_workers.labels(self.metric_label).dec()
+        start = default_timer()
+        future = self.spawner.spawn(worker.run, callback, *fn_args, **fn_kwargs)
+        self.running_routes[future] = route
+        def update_worker_metrics(future):
+            worker = future.result()
+            tasks_number.labels(self.metric_label, route.metric_label).dec()
+            available_workers.labels(self.metric_label).inc()
+            self.running_routes.pop(future, None)
+            if worker.exception is not None:
+                tasks_failures_counter.labels(
+                    self.metric_label, route.metric_label
+                ).inc()
+            duration = default_timer() - start
+            tasks_duration.labels(
+                self.metric_label, route.metric_label
+            ).observe(duration)
+
+        future.add_done_callback(update_worker_metrics)
         return future
 
     def spawn_async_extension(self, extension, coroutine, callback=None):
@@ -254,6 +250,10 @@ class RunnerContext:
             # logger.error(f"Exception in thread: \n{future.exception()}")
             # self.stop()
             # raise future.exception()
+
+    @property
+    def available_workers(self):
+        return len(self.running_routes) - self.max_workers
 
 
 class Runner:

@@ -39,20 +39,33 @@ class PrometheusMetricServer(Extension):
     def stop(self):
         self.httpd.shutdown()
 
-# Runner Metrics
 
+# Runner Metrics
 tasks_number = Gauge(
     'tasks_number', 'Number of Tasks being run at the moment',
+    ["context", 'route']
 )
 
 tasks_counter = Counter(
-    'tasks_number', 'Total number of tasks'
+    'tasks_number', 'Total number of tasks',
+    ["context", "route"]
 )
 
 tasks_failures_counter = Counter(
     'failed_tasks', 'Total number of tasks that have failed',
+    ["context", "route"]
 )
 
-tasks_duration = Summary('task_duration_seconds', 'Duration time of a task')
+tasks_duration = Summary(
+    'task_duration_seconds', 'Duration time of a task',
+    ["context", "route"]
+)
 
-info = Info('service', 'Information regarding the service')
+info = Info(
+    'service', 'Information regarding the service', ["context"]
+)
+
+available_workers = Gauge(
+    "available_workers", "Number of Workers available",
+    ["context"]
+)
