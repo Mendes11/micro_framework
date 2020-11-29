@@ -1,3 +1,4 @@
+import inspect
 import logging
 
 from functools import partial
@@ -25,7 +26,7 @@ class Route(Extension):
 
     def __init__(self, target, entrypoint, dependencies=None,
                  translators=None, worker_class=None, backoff=None,
-                 method_name=None):
+                 method_name=None, metric_label=None):
         self._entrypoint = entrypoint
         self._dependencies = dependencies or {}
         self._translators = translators or []
@@ -35,6 +36,7 @@ class Route(Extension):
         self.current_workers = {}
         self.worker_class = worker_class or self.worker_class
         self._backoff = backoff
+        self._metric_label = metric_label
 
     def handle_finished_worker(self, entry_id, worker):
 
@@ -62,7 +64,7 @@ class Route(Extension):
     def run_worker(self, entry_id, worker, callback=None):
         if callback is None:
             callback = partial(self.worker_result, entry_id)
-        future = self.runner.spawn_worker(worker)
+        future = self.runner.spawn_worker(self, worker)
         future.add_done_callback(callback)
 
     def start_route(self, entry_id, *fn_args, _meta=None, **fn_kwargs):
@@ -108,8 +110,19 @@ class Route(Extension):
     def backoff(self):
         return self._backoff
 
+    @property
+    def metric_label(self):
+        return self._metric_label or self.__str__().replace(" -> ", "__")
+
     def __str__(self):
-        return f'{self.__class__.__name__} -> {self.target}'
+        target = self.target
+        if inspect.isfunction(target):
+            target = target.__name__
+        elif inspect.isclass(target):
+            target = "{}.{}".format(target.__name__.lower(), self.method_name)
+        elif self.method_name:
+            target = "{}.{}".format(target, self.method_name)
+        return f'{self.__class__.__name__} -> {target}'
 
     def __repr__(self):
         return self.__str__()
