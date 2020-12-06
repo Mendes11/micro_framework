@@ -2,10 +2,11 @@ import inspect
 import json
 import logging
 import threading
-
-from abc import ABC, abstractmethod
 from concurrent.futures._base import Future
 
+from abc import ABC, abstractmethod
+
+import micro_framework
 from micro_framework.dependencies import Dependency
 from micro_framework.exceptions import RPCTargetDoesNotExist, \
     RPCException
@@ -15,8 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def import_exception(exception):
+    fw_exceptions = dict(inspect.getmembers(
+        micro_framework.exceptions,
+        lambda x: inspect.isclass(x) and issubclass(x, Exception)
+    ))
     if exception['exception'] in __builtins__:
         return __builtins__[exception['exception']](exception['message'])
+    elif exception["exception"] in fw_exceptions:
+        return fw_exceptions[exception["exception"]](exception.get("message"))
     return RPCException(exception)
 
 
@@ -342,6 +349,7 @@ class RPCTarget:
     It exposes methods to call the target synchronously or asynchronously.
 
     """
+
     def __init__(self, client: RPCClient, target, args=None, kwargs=None,
                  docstring=None):
         self.client = client
@@ -350,12 +358,15 @@ class RPCTarget:
         self.target_kwargs = kwargs
         self.target_doc = docstring
 
-    @staticmethod
-    def _call_client(message: str, client: RPCClient, future: Future):
+    def call(self, message, client):
         with client.get_connection() as connection:
             connection.send(message)
-            message = connection.recv()
-        result = parse_rpc_response(message)
+            result_message = connection.recv()
+        return parse_rpc_response(result_message)
+
+    def _call_client_task(
+            self, message: str, client: RPCClient, future: Future):
+        result = self.call(message, client)
         if isinstance(result, Exception):
             future.set_exception(result)
             return
@@ -373,12 +384,12 @@ class RPCTarget:
         message = format_rpc_command(self.target, *args, **kwargs)
         future = Future()
 
-        #FIXME This is smelly... how is it usually done? Maybe use the runner
+        # FIXME This is smelly... how is it usually done? Maybe use the runner
         # spawners to do it, but then issue #12 should be done first.
         # TODO Change to executor to use the submit method and it will
         #  automatically handle the Future class.
         t = threading.Thread(
-            target=self._call_client, args=(message, self.client, future)
+            target=self._call_client_task, args=(message, self.client, future)
         )
         t.daemon = True
         t.start()
@@ -415,6 +426,8 @@ class RPCProxy:
     RPCTarget class object.
 
     """
+    target_class = RPCTarget
+
     def __init__(self, client, targets, name=None):
         self._targets = set()
         self.client = client
@@ -423,15 +436,29 @@ class RPCProxy:
         for target in targets:
             self._targets.add(self.add_target(target))
 
+    def get_target_class(self):
+        return self.target_class
+
+    def get_target_kws(self, **target):
+        return {
+            "client": self.client,
+            **target,
+        }
+
+    def get_target(self, **target):
+        return self.get_target_class()(**self.get_target_kws(**target))
+
+    def new_nested_proxy(self, name):
+        return self.__class__(self.client, [], name=name)
+
     def add_target(self, target, nested_name=None):
         target_name = nested_name or target['target']
         target_name, *nested = target_name.split('.')
         if nested:
-            obj = getattr(self, target_name, RPCProxy(
-                self.client, [], name=target_name))
+            obj = getattr(self, target_name, self.new_nested_proxy(target_name))
             obj.add_target(target, '.'.join(nested))
         else:
-            obj = RPCTarget(self.client, **target)
+            obj = self.get_target(**target)
         setattr(self, target_name, obj)
         return obj
 
@@ -525,9 +552,21 @@ class RPCDependency(RPCDependencyMixin, Dependency):
     Dependency Provider that injects a RPCProxy into the worker's target.
 
     """
+    proxy_class = RPCProxy
+
+    def get_proxy_class(self):
+        return self.proxy_class
+
+    def get_proxy_kws(self):
+        return {
+            "client": self.get_client(),
+            "targets": self.targets,
+            "name": None
+        }
+
     def setup(self):
         super(RPCDependencyMixin, self).setup()
         self.targets = self.list_targets() or []
 
     def get_dependency(self, worker):
-        return RPCProxy(self.get_client(), self.targets)
+        return self.get_proxy_class()(**self.get_proxy_kws())

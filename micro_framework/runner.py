@@ -253,7 +253,7 @@ class RunnerContext:
 
     @property
     def available_workers(self):
-        return len(self.running_routes) - self.max_workers
+        return self.max_workers - len(self.running_routes)
 
 
 class Runner:

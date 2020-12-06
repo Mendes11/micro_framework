@@ -18,8 +18,9 @@ def thread_worker(executor, write_queue):
             if executor.shutdown_signal or task_id is None:
                 # Shutdown signal
                 return
-        task = executor._tasks.pop(task_id)  # Remove to avoid Mem. inflating.
-        task.run()
+        task = executor._tasks.pop(task_id, None)  # Remove to avoid Mem. inflating.
+        if task is not None:
+            task.run()
 
 
 class ThreadSpawner(Spawner, _base.Executor):

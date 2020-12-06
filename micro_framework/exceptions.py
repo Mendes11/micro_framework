@@ -17,5 +17,12 @@ class RPCException(FrameworkException):
     def __init__(self, exception_dict):
         self.exc_type = exception_dict['exception']
         self.value = exception_dict['message']
-        message = f"{self.exc_type} {self.value}"
+        if self.value:
+            message = f"{self.exc_type} {self.value}"
+        else:
+            message = self.exc_type
         super(RPCException, self).__init__(message)
+
+
+class MaxConnectionsReached(FrameworkException):
+    pass
