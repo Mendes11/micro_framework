@@ -1,7 +1,7 @@
 from functools import partial
 
 from micro_framework.entrypoints import Entrypoint
-from micro_framework.exceptions import FrameworkException
+from micro_framework.exceptions import FrameworkException, MaxConnectionsReached
 from micro_framework.websocket.manager import WebSocketManager
 
 
@@ -17,6 +17,8 @@ class WebSocketEntrypoint(Entrypoint):
         :param message:
         :return:
         """
+        if self.runner.available_workers <= 0:
+            raise MaxConnectionsReached("No Available Workers")
         self.runner.event_loop.run_in_executor(
             None,
             func=partial(self.call_route, websocket, *args, **kwargs)

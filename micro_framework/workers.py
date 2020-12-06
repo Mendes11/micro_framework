@@ -63,12 +63,12 @@ class Worker:
         try:
             self.result = fn(*fn_args, **fn_kwargs)
         except Exception as exc:
-            if self.config.get('WORKER_MODE', 'thread') == 'process':
-                # Trick from concurrent.futures to keep the traceback in
-                # process type worker.
-                self.exception = _ExceptionWithTraceback(exc, exc.__traceback__)
-            else:
-                self.exception = exc
+            # if self.config.get('WORKER_MODE', 'thread') == 'process':
+            #     # Trick from concurrent.futures to keep the traceback in
+            #     # process type worker.
+            #     self.exception = _ExceptionWithTraceback(exc, exc.__traceback__)
+            # else:
+            self.exception = exc
 
             self.call_dependencies(
                 self._dependencies, 'after_call', self, self.result, exc
