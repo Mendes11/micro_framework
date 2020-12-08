@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -39,7 +40,8 @@ class WebSocketServer:
             await self.unregister_client(websocket)
 
     async def send(self, websocket, message):
-        await websocket.send(message)
+        if not websocket.closed:
+            await websocket.send(message)
 
     async def message_received(self, websocket, message):
         pass

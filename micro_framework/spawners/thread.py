@@ -11,8 +11,8 @@ from micro_framework.spawners.base import Spawner, Task
 logger = logging.getLogger(__name__)
 
 
-def thread_worker(executor, write_queue):
-    while True:
+def thread_worker(executor, write_queue, stop_event: threading.Event):
+    while not stop_event.isSet():
         task_id = write_queue.get()
         with executor.shutdown_lock:
             if executor.shutdown_signal or task_id is None:
@@ -26,7 +26,8 @@ def thread_worker(executor, write_queue):
 class ThreadSpawner(Spawner, _base.Executor):
     def __init__(self, max_workers=3, **kwargs):
         self.max_workers = max_workers
-        self._pool = None
+        self._pool = []
+        self._stop_map = {}
         self.ctx = multiprocessing.get_context()
         self.write_queue = Queue(ctx=self.ctx)
         self.shutdown_signal = False
@@ -35,17 +36,46 @@ class ThreadSpawner(Spawner, _base.Executor):
         self.total_tasks = 0
         self._tasks = {}
 
-    def initiate_pool(self):
-        self._pool = [
-            threading.Thread(
-                target=thread_worker,
-                args=(self, self.write_queue)
-            )
-            for _ in range(self.max_workers)
-        ]
+    def _check_pool(self):
+        """
+        Verify the threads in the pool to spawn a new thread in case the
+        count is different than the max_workers
+        :return:
+        """
+        with self.shutdown_lock:
+            if self.shutdown_signal:
+                return
+        logger.debug(f"Checking for dead threads in the pool. Currently "
+                    f"{self._pool} threads in the pool.")
+
         for thread in self._pool:
-            thread.daemon = True
-            thread.start()
+            if not thread.is_alive():
+                logger.debug(
+                    f"Thread {thread} - PID: {thread.ident} is dead. Spawning "
+                    f"a new thread to the pool."
+                )
+                self.stop_thread(thread)
+                self.start_new_thread()
+
+    def start_new_thread(self):
+        evt = threading.Event()
+        t = threading.Thread(
+            target=thread_worker,
+            args=(self, self.write_queue, evt)
+        )
+        t.daemon = True
+        self._stop_map[t] = evt
+        self._pool.append(t)
+        t.start()
+        return t
+
+    def stop_thread(self, thread):
+        self._pool.remove(thread)
+        self._stop_map[thread].set()
+
+    def initiate_pool(self):
+        for _ in range(self.max_workers):
+            self.start_new_thread()
 
     def create_task(self, target, *target_args, **target_kwargs):
         task = Task(self.total_tasks + 1, target, *target_args, **target_kwargs)

@@ -6,8 +6,8 @@ class Dependency(Extension):
     Kind of extension that injects a dependency into the function.
     """
 
-    def bind(self, config):
-        self.config = config
+    def bind(self, runner):
+        self.config = runner.config
 
     def before_call(self, worker):
         """

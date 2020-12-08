@@ -51,6 +51,7 @@ class Route(Extension):
         if future.exception():
             # Unhandled exception propagate it to kill thread.
             raise future.exception()
+        logger.debug("Worker Result: {}".format(future.result().result))
         worker = future.result()
         self.handle_finished_worker(entry_id, worker)
 
@@ -78,7 +79,7 @@ class Route(Extension):
         self.entrypoint.bind_to_route(self)
         if self.dependencies:
             for name, dependency in self.dependencies.items():
-                dependency.bind(self.runner.config) # TODO Maybe binding later to route only
+                dependency.bind(self.runner) # TODO Maybe binding later to route only
         if self.backoff is not None:
             # Link this route to the given backoff class
             self.backoff.bind_route(self)
