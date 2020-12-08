@@ -1,3 +1,7 @@
+import asyncio
+import json
+from concurrent.futures.thread import ThreadPoolExecutor
+
 from micro_framework.rpc import RPCDependency
 from micro_framework.websocket.client import WebSocketConnection
 from micro_framework.websocket.rpc import WSRPCProxy
@@ -6,7 +10,6 @@ from micro_framework.websocket.rpc import WSRPCProxy
 class WebSocketRPCClient(RPCDependency):
     connection_class = WebSocketConnection
     proxy_class = WSRPCProxy
-
 
     def __init__(self, address, port, timeout=None):
         self.address = address

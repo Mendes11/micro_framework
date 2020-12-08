@@ -14,6 +14,7 @@ class PrometheusMetricServer(Extension):
     def setup(self):
         self.config = self.runner.config['METRICS']
         self.enabled = self.runner.config['ENABLE_METRICS']
+        self.started = False
 
     def start(self):
         """
@@ -34,10 +35,12 @@ class PrometheusMetricServer(Extension):
                 "Prometheus Metrics Server Started\n\t-Listening at"
                 f" {self.config['HOST']}:{self.config['PORT']}"
             )
+            self.started = True
             self.httpd.serve_forever()
 
     def stop(self):
-        self.httpd.shutdown()
+        if self.started:
+            self.httpd.shutdown()
 
 
 # Runner Metrics

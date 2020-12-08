@@ -274,6 +274,11 @@ class Runner:
         self.metric_server = metric_server
         self.metric_server.bind(self)
 
+    def exception_handler(self, loop, context):
+        self.event_loop.create_task(self._stop(loop))
+        if context.get("exception"):
+            raise context.get("exception")
+
     def get_spawner(self, spawner_type, **spawner_configs):
         """
         Returns and register a new spawner instance.
@@ -291,35 +296,36 @@ class Runner:
             await context.bind(self)
             await context.setup()
         self.metric_server.setup()
-
-        self.context_tasks = [
-            self.event_loop.create_task(context.start())
-            for context in self.contexts
-        ]
-
         self.event_loop.run_in_executor(None, self.metric_server.start)
+
+        for context in self.contexts:
+            await context.start()
+
+    async def _stop(self, loop):
+        cancel_contexts = [context.stop() for context in self.contexts]
+        await asyncio.gather(*cancel_contexts, return_exceptions=True)
+
+        tasks = [
+            t for t in asyncio.all_tasks() if t is not asyncio.current_task()
+        ]
+        for task in tasks: task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self.metric_server.stop()
+        loop.stop()
+        logger.info("Runner stopped")
+
 
     def start(self):
         self.event_loop = asyncio.get_event_loop()
-        self.event_loop.create_task(self._start())
+        self.event_loop.set_exception_handler(self.exception_handler)
         try:
+            self.event_loop.run_until_complete(self._start())
             self.event_loop.run_forever()
         except (KeyboardInterrupt, asyncio.CancelledError):
-            self.stop()
+            self.event_loop.run_until_complete(self._stop(self.event_loop))
         except Exception:
-            self.stop()
+            self.event_loop.run_until_complete(self._stop(self.event_loop))
             raise
-
-    def stop(self):
-
-        # Stopping all contexts
-        self.event_loop.run_until_complete(
-            asyncio.gather(*[context.stop() for context in self.contexts])
-        )
-        self.metric_server.stop()
-
-        self.event_loop.close()
-        logger.info("Runner stopped")
 
 
 def find_extensions(cls):

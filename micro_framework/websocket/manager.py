@@ -36,7 +36,7 @@ class WebSocketManager(AsyncRPCManagerMixin, WebSocketServer):
 
     def stop(self):
         if self.started:
-            self.server.ws_server.close()
+            self.runner.event_loop.call_soon_threadsafe(self.server.close())
 
     async def register_client(self, websocket):
         active_connections.inc()
@@ -66,6 +66,7 @@ class WebSocketManager(AsyncRPCManagerMixin, WebSocketServer):
         """
         message = format_rpc_response(data, exception)
         # Re-enter the event loop to send the response to the client.
-        asyncio.run_coroutine_threadsafe(
-            self.send(websocket, message), self.runner.event_loop
+        task = asyncio.run_coroutine_threadsafe(
+            self.send(websocket, message), loop=self.runner.event_loop
         )
+        task.result() # Wait it to send
