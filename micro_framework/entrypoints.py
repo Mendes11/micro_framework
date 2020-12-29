@@ -1,5 +1,5 @@
+import asyncio
 import logging
-import time
 import uuid
 from datetime import datetime
 from timeit import default_timer as timer
@@ -13,38 +13,55 @@ logger = logging.getLogger(__name__)
 class Entrypoint(Extension):
     route = None
 
-    def bind_to_route(self, route):
+    async def bind_to_route(self, route):
         self.route = route
 
-    def call_route(self, entry_id, *args, _meta=None, **kwargs):
+    async def call_route(self, entry_id, *args, _meta=None, **kwargs):
         """
         Call the binded Route to start a new worker with the received content
         from the entrypoint.
 
         It returns the Instantiated Worker.
 
-        :param entry_id:
-        :param args:
-        :param _meta:
-        :param kwargs:
-        :return:
+        :param entry_id: Some object/identifier to be used to send a response
+        for the correct caller.
+        :param args: Additional arguments to be sent to the Route target
+        function (such as payload for the event case)
+        :param _meta: Metadata about this entrypoint, usually for internal
+        use. (See AsyncRetry to an example)
+        :param kwargs: Additional kwargs to be sent to the Route target
+        function.
         """
         try:
-            return self.route.start_route(
+            return await self.route.start_route(
                 entry_id, *args, _meta=_meta, **kwargs
             )
         except PoolStopped:  # Unexpected error and we want to
             logger.info("New entry called when pool was already "
                         "signalled to stop.")
-            self.on_failure(entry_id)
+            await self.on_failure(entry_id)
         except Exception:
             logger.exception("Failure when trying to start route for "
                              f"entrypoint: {self}")
 
-    def on_finished_route(self, entry_id, worker):
+    async def on_finished_route(self, entry_id, worker):
+        """
+        When a Route receives a callback from a finished worker, it will call
+        this method to handle the response from that worker.
+        :param entry_id: Some object/identifier to be used to send a response
+        for the correct caller.
+        :param Worker worker: Worker Instance with result/exception attrs.
+        """
         pass
 
-    def on_failure(self, entry_id):
+    async def on_failure(self, entry_id):
+        """
+        When a Route fails to spawn a worker to some reason, it will call
+        this method to handle what to do about it.
+
+        :param entry_id: Some object/identifier to be used to send a response
+        for the correct caller.
+        """
         pass
 
 
@@ -53,24 +70,29 @@ class TimeEntrypoint(Entrypoint):
         self.interval = interval
         self.running = False
 
-    def start(self):
-        self.running = True
-        self.runner.spawn_extension(self, self.run)
+    async def start(self):
+        """
+        Start a loop that sleeps for a configured interval and then call the
+        bind Route.
 
-    def run(self):
+        Since it runs in a loop, some caution should be taken to prevent it
+        from locking the event loop.
+        """
+        self.running = True
         last_time = timer()
+
         while self.running:
             elapsed_time = timer() - last_time
             sleep_time = self.interval - elapsed_time
             if sleep_time > 0:
-                time.sleep(sleep_time)
+                await asyncio.sleep(sleep_time)
             last_time = timer()
             entry_id = uuid.uuid4()
             now = datetime.utcnow()
             try:
-                self.call_route(entry_id, now.isoformat())
+                await self.call_route(entry_id, now.isoformat())
             except (ExtensionIsStopped, PoolStopped):
                 pass
 
-    def stop(self):
+    async def stop(self):
         self.running = False

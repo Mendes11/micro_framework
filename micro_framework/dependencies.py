@@ -1,13 +1,19 @@
 from micro_framework.extensions import Extension
 
-
+# TODO Due to multiprocessing, we need to check if asyncio is doable here.
 class Dependency(Extension):
     """
     Kind of extension that injects a dependency into the function.
     """
 
-    def bind(self, config):
+    async def bind(self, config):
         self.config = config
+
+    def setup_dependency(self, worker):
+        """
+        First method called when inside a worker.
+        """
+        pass
 
     def before_call(self, worker):
         """

@@ -17,7 +17,7 @@ class MessageTranslator:
 
     def translate(self, *args, **kwargs):
         message = self.get_message(*args, **kwargs)
-        translated = self.translate(message)
+        translated = self.translate_message(message)
         return self.set_message(translated, *args, **kwargs)
 
 

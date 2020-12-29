@@ -19,7 +19,7 @@ class Extension:
         inst._params = (args, kwargs)
         return inst
 
-    def bind(self, runner):
+    async def bind(self, runner):
         """
         Binds the extension to the service runner and parent.
         :param Runner runner: Service Runner
@@ -33,21 +33,21 @@ class Extension:
         # Binding sub-extensions
         for attr_name, extension in inspect.getmembers(
                 self, lambda x: isinstance(x, Extension)):
-            extension.bind(runner)
+            await extension.bind(runner)
 
-    def setup(self):
+    async def setup(self):
         """
         Called After the binding and before the system start
         """
         pass
 
-    def start(self):
+    async def start(self):
         """
         Commands the extension to start running.
         """
         pass
 
-    def stop(self):
+    async def stop(self):
         """
         Commands the extension to do a graceful stop
         """

@@ -99,8 +99,12 @@ class Worker:
             )
 
         # Setup Dependency Providers
-        self.call_dependencies(self._dependencies, 'setup')
-        self.call_dependencies(self._class_dependencies, 'setup')
+        self.call_dependencies(
+            self._dependencies, 'setup_dependency', self
+        )
+        self.call_dependencies(
+            self._class_dependencies, 'setup_dependency', self
+        )
 
         # Obtaining Dependencies from Providers
         dependencies = self.call_dependencies(

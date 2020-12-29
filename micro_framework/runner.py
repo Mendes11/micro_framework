@@ -2,6 +2,7 @@
 import asyncio
 import inspect
 import logging.config
+import sys
 import time
 from concurrent.futures._base import CancelledError
 
@@ -29,10 +30,6 @@ class RunnerContext:
     It is a context of the framework, where the routes will share the same
     spawners (and therefore the max_workers number)
     """
-    # TODO Configure the MetricServer to add info about this runner instance.
-    # TODO Also, we should add metrics like workers availability, so the
-    #  scaler (if used) could use this metric as a parameter to know when to
-    #  scale.
     def __init__(
             self, routes, worker_mode=None, max_workers=None,
             max_tasks_per_child=None, context_metric_label=None
@@ -50,10 +47,7 @@ class RunnerContext:
         self.entrypoints = set()
         self.extra_extensions = set()
         self.metric_label = context_metric_label or f"context_{id(self)}"
-        self.bind_extensions()
-        self._find_extensions()
         self.running_routes = {}
-        logger.debug(f"Extensions: {self.extensions}")
 
     async def bind(self, runner):
         """
@@ -64,6 +58,10 @@ class RunnerContext:
         self.runner = runner
 
     async def setup(self):
+        await self.bind_routes()
+        await self._find_extensions()
+        logger.debug(f"Extensions: {self.extensions}")
+
         self.config = self.runner.config
         self.metric_server = self.runner.metric_server
 
@@ -74,7 +72,7 @@ class RunnerContext:
         if self.max_tasks_per_child is None:
             self.max_tasks_per_child = self.config["MAX_TASKS_PER_CHILD"]
 
-        self.spawner = self.runner.get_spawner(
+        self.spawner = await self.runner.get_spawner(
             self.worker_mode, max_workers=self.max_workers,
             max_tasks_per_child=self.max_tasks_per_child
         )
@@ -88,31 +86,31 @@ class RunnerContext:
         )
         available_workers.labels(self.metric_label).set(self.available_workers)
 
-    def _call_extensions_action(self, action, extension_set=None):
+    async def _call_extensions_action(self, action, extension_set=None):
         if extension_set is None:
             extension_set = self.extensions
         for extension in extension_set:
             logger.debug(f"Calling {action} for {extension}")
-            getattr(extension, action)()
+            await getattr(extension, action)()
 
-    def _find_extensions(self):
+    async def _find_extensions(self):
         for route in self.routes:
-            extensions = find_extensions(route)
+            extensions = await find_extensions(route)
             for extension in extensions:
-                self.register_extension(extension)
+                await self.register_extension(extension)
 
     @property
     def extensions(self):
         return {*self.routes, *self.entrypoints, *self.extra_extensions}
 
-    def bind_extensions(self):
+    async def bind_routes(self):
         for route in self.routes:
-            if not isinstance(route, Extension):
-                raise TypeError("Only Extensions should be added as a "
-                                "entrypoints.")
-            route.bind(self)
+            if not isinstance(route, Route):
+                raise TypeError("Only Route class should be added as a "
+                                "route.")
+            await route.bind(self)
 
-    def register_extension(self, extension):
+    async def register_extension(self, extension):
         if isinstance(extension, Entrypoint):
             self.entrypoints.add(extension)
         else:
@@ -126,20 +124,23 @@ class RunnerContext:
         )
 
         # First we tell the routes to bind to their extensions
-        self._call_extensions_action(
+        await self._call_extensions_action(
             'bind_to_extensions', extension_set=self.routes
         )
         logger.debug(f"Extensions: {self.extensions}")
 
         # Once we have all extensions detected:
         # Setup Routes first then entrypoints and then extra extensions.
-        self._call_extensions_action('setup', extension_set=self.routes)
-        self._call_extensions_action('setup', extension_set=self.entrypoints)
-        self._call_extensions_action('setup',
-                                     extension_set=self.extra_extensions)
+        await self._call_extensions_action('setup', extension_set=self.routes)
+        await self._call_extensions_action(
+            'setup', extension_set=self.entrypoints
+        )
+        await self._call_extensions_action(
+            'setup', extension_set=self.extra_extensions
+        )
 
         # Finally, we start all extensions.
-        self._call_extensions_action('start')
+        await self._call_extensions_action('start')
 
     async def stop(self):
         self.is_running = False
@@ -147,15 +148,16 @@ class RunnerContext:
         logger.info("Stopping all context extensions and workers")
 
         # Stopping Entrypoints First
-        self._call_extensions_action('stop', extension_set=self.routes)
+        await self._call_extensions_action('stop', extension_set=self.routes)
 
         # Stop Workers
         logger.debug("Stopping workers")
         self.spawner.stop(wait=True)
 
         logger.debug("Stopping extra extensions")
-        self._call_extensions_action('stop',
-                                     extension_set=self.extra_extensions)
+        await self._call_extensions_action(
+            'stop', extension_set=self.extra_extensions
+        )
 
         # Stop running extensions
         logger.debug("Stopping any still running extensions thread")
@@ -164,11 +166,9 @@ class RunnerContext:
         for task in self.spawned_extensions:
             task.cancel()
 
-        # self.event_loop.call_soon_threadsafe(self.event_loop.stop)
-        # self.event_loop.stop()
-        # self.event_loop.close()
-
-    def spawn_worker(self, route, worker, *fn_args, callback=None, **fn_kwargs):
+    async def spawn_worker(
+            self, route, worker, *fn_args, callback=None, **fn_kwargs
+    ):
         """
         Spawn a new worker to execute a function from the calling route.
 
@@ -180,8 +180,9 @@ class RunnerContext:
         tasks_number.labels(self.metric_label, route.metric_label).inc()
         available_workers.labels(self.metric_label).dec()
         start = default_timer()
-        future = self.spawner.spawn(worker.run, callback, *fn_args, **fn_kwargs)
+        future = self.spawner.spawn(worker.run, *fn_args, **fn_kwargs)
         self.running_routes[future] = route
+
         def update_worker_metrics(future):
             worker = future.result()
             tasks_number.labels(self.metric_label, route.metric_label).dec()
@@ -196,20 +197,32 @@ class RunnerContext:
                 self.metric_label, route.metric_label
             ).observe(duration)
 
+            if callback:
+                self.execute_async(callback(future))
+
         future.add_done_callback(update_worker_metrics)
         return future
 
-    def spawn_async_extension(self, extension, coroutine, callback=None):
-        if callback is None:
-            callback = self.extension_thread_callback
+    def execute_async(self, coroutine):
+        """
+        Executes a coroutine in the background, without awaiting it.
 
-        task = asyncio.ensure_future(coroutine)
-        task.add_done_callback(callback)
-        self.spawned_extensions[task] = extension
-        return task
+        This method is to normal functions/methods from extensions to call an
+        async function.
 
-    def spawn_extension(self, extension, target_fn, *fn_args, callback=None,
-                        **fn_kwargs):
+        :param coroutine: Coroutine
+        :return Future: Future object.
+        """
+        future = asyncio.run_coroutine_threadsafe(coroutine, self.event_loop)
+        def on_finished_task(future):
+            if future.exception():
+                raise future.exception()
+        future.add_done_callback(on_finished_task)
+        return future
+
+    async def spawn_extension(
+            self, extension, target_fn, *fn_args, callback=None, **fn_kwargs
+    ):
         """
         Any extension that needs an async call should call this method to
         start it.
@@ -224,20 +237,18 @@ class RunnerContext:
         :return Future: A future object of the task.
         """
         if inspect.iscoroutinefunction(target_fn):
-            return self.spawn_async_extension(
-                extension, target_fn(*fn_args, **fn_kwargs), callback
-            )
+            coroutine = target_fn(*fn_args, **fn_kwargs)
+            future = self.execute_async(coroutine)
+        else:
+            target_fn = partial(target_fn, *fn_args, **fn_kwargs)
+            future = self.event_loop.run_in_executor(None, target_fn)
 
         if callback is None:
             callback = self.extension_thread_callback
 
-        target_fn = partial(target_fn, *fn_args, **fn_kwargs)
-        task = self.event_loop.run_in_executor(None, target_fn)
-
-        task.add_done_callback(callback)
-
-        self.spawned_extensions[task] = extension
-        return task
+        future.add_done_callback(callback)
+        self.spawned_extensions[future] = extension
+        return future
 
     def extension_thread_callback(self, future):
         """
@@ -247,9 +258,6 @@ class RunnerContext:
         if not future.cancelled() and future.exception() and not isinstance(
                 future.exception(), (CancelledError, asyncio.CancelledError)):
             raise future.exception()
-            # logger.error(f"Exception in thread: \n{future.exception()}")
-            # self.stop()
-            # raise future.exception()
 
     @property
     def available_workers(self):
@@ -267,19 +275,14 @@ class Runner:
         if isinstance(contexts[0], Route):
             contexts = [RunnerContext(contexts)]
         self.contexts = contexts
-
-        # Metric Extension Binding
-        if metric_server is None:
-            metric_server = PrometheusMetricServer()
         self.metric_server = metric_server
-        self.metric_server.bind(self)
 
     def exception_handler(self, loop, context):
-        self.event_loop.create_task(self._stop(loop))
+        asyncio.run_coroutine_threadsafe(self._stop(), self.event_loop)
         if context.get("exception"):
             raise context.get("exception")
 
-    def get_spawner(self, spawner_type, **spawner_configs):
+    async def get_spawner(self, spawner_type, **spawner_configs):
         """
         Returns and register a new spawner instance.
         :param str spawner_type: The type of the Spawner
@@ -291,27 +294,42 @@ class Runner:
         return spawner
 
     async def _start(self):
+        # Metric Extension Binding
         self.event_loop = asyncio.get_event_loop()
+
+        if self.metric_server is None:
+            self.metric_server = PrometheusMetricServer()
+        await self.metric_server.bind(self)
+
         for context in self.contexts:
             await context.bind(self)
             await context.setup()
-        self.metric_server.setup()
-        self.event_loop.run_in_executor(None, self.metric_server.start)
+        await self.metric_server.setup()
+        await self.metric_server.start()
+
 
         for context in self.contexts:
             await context.start()
 
-    async def _stop(self, loop):
+    async def _stop(self):
+        # TODO Ensure that all spawner pools are stopped so then we stop the
+        #  rest
         cancel_contexts = [context.stop() for context in self.contexts]
         await asyncio.gather(*cancel_contexts, return_exceptions=True)
 
-        tasks = [
-            t for t in asyncio.all_tasks() if t is not asyncio.current_task()
-        ]
+        if sys.version_info[1] < 7:
+            tasks = [
+                t for t in asyncio.Task.all_tasks(self.event_loop)
+                if t is not asyncio.Task.current_task(self.event_loop)
+            ]
+        else:
+            tasks = [
+                t for t in asyncio.all_tasks() if t is not asyncio.current_task()
+            ]
         for task in tasks: task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        self.metric_server.stop()
-        loop.stop()
+        await self.metric_server.stop()
+        self.event_loop.stop()
         logger.info("Runner stopped")
 
 
@@ -322,16 +340,16 @@ class Runner:
             self.event_loop.run_until_complete(self._start())
             self.event_loop.run_forever()
         except (KeyboardInterrupt, asyncio.CancelledError):
-            self.event_loop.run_until_complete(self._stop(self.event_loop))
+            self.event_loop.run_until_complete(self._stop())
         except Exception:
-            self.event_loop.run_until_complete(self._stop(self.event_loop))
+            self.event_loop.run_until_complete(self._stop())
             raise
 
 
-def find_extensions(cls):
+async def find_extensions(cls):
     extensions = set()
     for name, extension in inspect.getmembers(
             cls, lambda x: isinstance(x, Extension)):
         extensions.add(extension)
-        extensions.update(find_extensions(extension))
+        extensions.update(await find_extensions(extension))
     return extensions

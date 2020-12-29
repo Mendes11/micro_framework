@@ -26,3 +26,12 @@ class RPCException(FrameworkException):
 
 class MaxConnectionsReached(FrameworkException):
     pass
+
+
+class RPCAsyncResponse(FrameworkException):
+    """
+    Exception used to differentiate when a RPC call should return or not
+
+    We raise an exception instead of returning None because None could be the
+    desired response.
+    """
