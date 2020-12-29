@@ -21,8 +21,6 @@ class ConsumerManager(Extension, ConsumerMixin):
         self.run_thread = None
         self.connection = None
         # Lock due to message object apparently not being thread-safe...
-        # TODO How to transform it in thread-safe? Substituting threading by
-        #  gevent?
         self.message_lock = Lock()
         self.started = False
 
@@ -35,20 +33,20 @@ class ConsumerManager(Extension, ConsumerMixin):
             "Error connecting to broker at {} ({}).\n"
             "Retrying in {} seconds.".format(self.amqp_uri, exc, interval))
 
-    def get_connection(self):
+    async def get_connection(self):
         if not self.connection:
             return Connection(self.amqp_uri, heartbeat=120)
         return self.connection
 
-    def setup(self):
-        self.connection = self.get_connection()
+    async def setup(self):
+        self.connection = await self.get_connection()
 
-    def start(self):
+    async def start(self):
         if not self.started:
-            self.run_thread = self.runner.spawn_extension(self, self.run)
+            self.run_thread = await self.runner.spawn_extension(self, self.run)
             self.started = True
 
-    def stop(self):
+    async def stop(self):
         if self.started:
             logger.debug("AMQP ConsumerManager is stopping")
             self.should_stop = True
@@ -56,7 +54,7 @@ class ConsumerManager(Extension, ConsumerMixin):
             logger.debug("AMQP ConsumerManager stopped.")
             self.started = False
 
-    def add_entrypoint(self, entrypoint):
+    async def add_entrypoint(self, entrypoint):
         queue = entrypoint.queue
         self.queues[queue] = entrypoint
 
@@ -80,15 +78,20 @@ class ConsumerManager(Extension, ConsumerMixin):
         logger.debug("Message Received")
         if not self.should_stop:
             try:
-                return entrypoint.new_entry(message, body)
+                self.runner.execute_async(
+                    entrypoint.new_entry(message, body)
+                )
+                return
             except (ExtensionIsStopped, PoolStopped):
                 pass
         message.requeue()
 
-    def ack_message(self, message):
+    async def ack_message(self, message):
+        # TODO using async we won't need this lock anymore. After all
+        #  convertion is completed, remove this a test it.
         with self.message_lock:  # One message at a time to prevent errors.
             message.ack()
 
-    def requeue_message(self, message):
+    async def requeue_message(self, message):
         with self.message_lock:
             message.requeue()

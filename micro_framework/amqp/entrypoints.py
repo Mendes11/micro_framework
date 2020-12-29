@@ -1,4 +1,5 @@
 from logging import getLogger
+from typing import Any
 
 from kombu import Exchange, Queue
 
@@ -23,7 +24,7 @@ class BaseEventListener(Entrypoint):
         self.exchange_type = exchange_type
         self.payload_filter = payload_filter
 
-    def get_exchange(self):
+    async def get_exchange(self):
         """
         Return the Exchange that will have a queue binded to.
         :return Exchange:
@@ -33,7 +34,7 @@ class BaseEventListener(Entrypoint):
             auto_delete=True
         )
 
-    def get_queue_name(self):
+    async def get_queue_name(self):
         """
         Return the name of the queue to be binded.
         It usually must be unique by consuming entrypoint to avoid the same
@@ -42,42 +43,44 @@ class BaseEventListener(Entrypoint):
         """
         return f'{self.exchange_name}_{self.routing_key}_queue'
 
-    def get_queue(self):
+    async def get_queue(self):
         """
         Returns the Queue to be created or loaded using the exchange and
         routing key declared.
         :return:
         """
+        queue_name = await self.get_queue_name()
+        exchange = await self.get_exchange()
         return Queue(
-            name=self.get_queue_name(), exchange=self.get_exchange(),
+            name=queue_name, exchange=exchange,
             routing_key=self.routing_key, durable=True
         )
 
-    def setup(self):
-        super(BaseEventListener, self).setup()
-        self.exchange = self.get_exchange()
-        self.queue = self.get_queue()
-        self.queue.maybe_bind(self.manager.get_connection())
+    async def setup(self):
+        await super(BaseEventListener, self).setup()
+        self.exchange = await self.get_exchange()
+        self.queue = await self.get_queue()
+        self.queue.maybe_bind(await self.manager.get_connection())
         self.queue.declare()
-        self.manager.add_entrypoint(self)
+        await self.manager.add_entrypoint(self)
 
-    def on_finished_route(self, entry_id, worker):
+    async def on_finished_route(self, entry_id, worker):
         # We ack the message independently of the result.
-        self.manager.ack_message(entry_id)
+        await self.manager.ack_message(entry_id)
 
-    def on_failure(self, entry_id):
+    async def on_failure(self, entry_id):
         # Something not related to the business logic went wrong.
-        self.manager.requeue_message(entry_id)
+        await self.manager.requeue_message(entry_id)
 
-    def new_entry(self, message, payload):
+    async def new_entry(self, message, payload: Any):
         """
         Called by the Manager when a new message is received.
         :param Message message: Message object
         :param dict|str payload: Event Payload
         """
         if not self.payload_filter or self.payload_filter(payload):
-            return self.call_route(message, payload)
-        self.manager.ack_message(message)
+            return await self.call_route(message, payload)
+        await self.manager.ack_message(message)
 
 
 class QueueListener(BaseEventListener):
@@ -85,10 +88,10 @@ class QueueListener(BaseEventListener):
         super(QueueListener, self).__init__(*args, **kwargs)
         self.queue_name = queue_name
 
-    def get_queue_name(self):
+    async def get_queue_name(self):
         if self.queue_name:
             return self.queue_name
-        return super(QueueListener, self).get_queue_name()
+        return await super(QueueListener, self).get_queue_name()
 
 
 class EventListener(QueueListener):
@@ -98,7 +101,7 @@ class EventListener(QueueListener):
         exchange_name = f'{source_service}.events'  # Nameko Compatible!
         super(EventListener, self).__init__(exchange_name, event_name, **kwargs)
 
-    def get_queue_name(self):
+    async def get_queue_name(self):
         service_name = self.runner.config['SERVICE_NAME']
         target = self.route.target
         if isinstance(target, str):
