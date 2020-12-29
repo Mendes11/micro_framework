@@ -49,6 +49,10 @@ class WebSocketServer:
         logger.info(f"WebSocketManager listening at {ip}:{port}")
         return self.server
 
+    async def stop(self):
+        if self.server:
+            self.server.close()
+
     def start_server(self, event_loop, ip, port):
         """
         Starts the WebSocket Server inside the event_loop.
@@ -57,3 +61,4 @@ class WebSocketServer:
         :param port: Port to bind the server at.
         """
         event_loop.run_until_complete(self.serve(ip, port))
+

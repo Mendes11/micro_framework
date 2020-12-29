@@ -34,10 +34,6 @@ class WebSocketManager(RPCManagerMixin, WebSocketServer):
             )
             self.started = True
 
-    async def stop(self):
-        if self.started:
-            await self.server.close()
-
     async def register_client(self, websocket):
         active_connections.inc()
         await super(WebSocketManager, self).register_client(websocket)

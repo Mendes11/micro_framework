@@ -12,6 +12,7 @@ from timeit import default_timer
 
 from micro_framework.config import FrameworkConfig
 from micro_framework.entrypoints import Entrypoint
+from micro_framework.exceptions import ExtensionIsStopped
 from micro_framework.extensions import Extension
 from micro_framework.metrics import PrometheusMetricServer, tasks_counter, \
     tasks_number, tasks_failures_counter, tasks_duration, info, \
@@ -140,6 +141,7 @@ class RunnerContext:
         )
 
         # Finally, we start all extensions.
+        self.is_running = True
         await self._call_extensions_action('start')
 
     async def stop(self):
@@ -147,7 +149,7 @@ class RunnerContext:
 
         logger.info("Stopping all context extensions and workers")
 
-        # Stopping Entrypoints First
+        # Stopping Routes
         await self._call_extensions_action('stop', extension_set=self.routes)
 
         # Stop Workers
@@ -176,6 +178,9 @@ class RunnerContext:
         :param fn_args: Arguments of the function to be called.
         :return Future: A Future object of the task.
         """
+        if not self.is_running:
+            raise ExtensionIsStopped()
+
         tasks_counter.labels(self.metric_label, route.metric_label).inc()
         tasks_number.labels(self.metric_label, route.metric_label).inc()
         available_workers.labels(self.metric_label).dec()
