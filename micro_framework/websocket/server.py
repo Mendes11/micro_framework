@@ -1,5 +1,3 @@
-import asyncio
-import json
 import logging
 
 import websockets
@@ -46,8 +44,8 @@ class WebSocketServer:
     async def message_received(self, websocket, message):
         pass
 
-    def serve(self, ip, port):
-        self.server = websockets.serve(self.listener, ip, port)
+    async def serve(self, ip, port):
+        self.server = await websockets.serve(self.listener, ip, port)
         logger.info(f"WebSocketManager listening at {ip}:{port}")
         return self.server
 
