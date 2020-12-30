@@ -64,11 +64,6 @@ class RunnerContext:
         if self.max_tasks_per_child is None:
             self.max_tasks_per_child = self.config["MAX_TASKS_PER_CHILD"]
 
-        self.spawner = await self.runner.get_spawner(
-            self.worker_mode, max_workers=self.max_workers,
-            max_tasks_per_child=self.max_tasks_per_child
-        )
-
         await self.bind_routes()
         await self._find_extensions()
         logger.debug(f"Extensions: {self.extensions}")
@@ -139,6 +134,10 @@ class RunnerContext:
         # Finally, we start all extensions.
         self.is_running = True
         await self._call_extensions_action('start')
+        self.spawner = await self.runner.get_spawner(
+            self.worker_mode, max_workers=self.max_workers,
+            max_tasks_per_child=self.max_tasks_per_child
+        )
 
     async def stop(self):
         self.is_running = False

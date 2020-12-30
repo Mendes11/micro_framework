@@ -33,7 +33,8 @@ class WebSocketConnection(RPCConnection):
 
     def __enter__(self):
         self.connection = create_connection(
-            self.uri, timeout=self.timeout, class_=WSConnection
+            self.uri, timeout=self.timeout, class_=WSConnection,
+            enable_multithread=True
         )
         return self.connection
 
