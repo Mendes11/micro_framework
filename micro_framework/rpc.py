@@ -148,6 +148,7 @@ class RPCManagerMixin(Extension):
         - kwargs: Kwargs for the specific target.
 
     """
+    singleton = True
 
     def __init__(self):
         super(RPCManagerMixin, self).__init__()
@@ -198,7 +199,6 @@ class RPCManagerMixin(Extension):
             return format_rpc_response(None, exc)
 
         return format_rpc_response(response)
-
 
     async def target_detail(self, entrypoint):
         """

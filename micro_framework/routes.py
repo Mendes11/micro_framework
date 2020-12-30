@@ -39,26 +39,35 @@ class Route(Extension):
         self._metric_label = metric_label
 
     async def handle_finished_worker(self, entry_id, worker):
+        """
+        Override this method to do some validations after a worker has
+        finished.
 
-        if worker.exception:
-            can_retry = self.backoff and await self.backoff.can_retry(worker)
-            if can_retry:
-                self.backoff.retry(worker)  # Retry and let the entrypoint finish
-                return
+        This method should return either the worker instance or None.
 
-        await self.entrypoint.on_finished_route(entry_id, worker)
-        if worker.exception:
-            raise worker.exception
+        :param entry_id:
+        :param worker:
+        :return:
+        """
+        return worker
 
-    async def worker_result(self, entry_id, future):
-        logger.debug(f"{self} Received a worker result.")
-        if future.exception():
-            # Unhandled exception propagate it to kill thread.
-            raise future.exception()
-        logger.debug("Worker Result: {}".format(future.result().result))
-        worker = future.result()
+    async def run_backoff(self, entry_id, worker):
+        """
+        Run a backoff class.
 
-        await self.handle_finished_worker(entry_id, worker)
+        This method will return the worker from the retry.
+        If None is returned, then it indicates that the backoff is running
+        asynchronously and we let the entrypoint decide what to do.
+
+        :param entry_id: Some object/identifier to be used to send a response
+        for the correct caller.
+
+        :param Worker worker: Worker Instance with result/exception attrs
+
+        :return Optional[Worker]: Worker Instance with result/exception
+        attrs or a None type, indicating an asynchronous backoff was made.
+        """
+        return await self.backoff.retry(worker)
 
     async def get_worker_instance(self, *fn_args, _meta=None, **fn_kwargs):
         return self.worker_class(
@@ -67,10 +76,18 @@ class Route(Extension):
             method_name=self.method_name, **fn_kwargs
         )
 
-    async def run_worker(self, entry_id, worker, callback=None):
-        if callback is None:
-            callback = partial(self.worker_result, entry_id)
-        await self.runner.spawn_worker(self, worker, callback=callback)
+    async def run_worker(self, entry_id, worker):
+        logger.debug(f"{self} is Spawning worker {worker}")
+        worker = await self.runner.spawn_worker(self, worker)
+        logger.debug(
+            f"{self} Received a worker result: {worker.result}."
+        )
+        if worker.exception:
+            can_retry = self.backoff and await self.backoff.can_retry(worker)
+            if can_retry:
+                worker = await self.run_backoff(entry_id, worker)
+
+        return await self.handle_finished_worker(entry_id, worker)
 
     async def start_route(self, entry_id, *fn_args, _meta=None, **fn_kwargs):
         if self.stopped:
@@ -78,19 +95,13 @@ class Route(Extension):
         worker = await self.get_worker_instance(
             *fn_args, _meta=_meta, **fn_kwargs
         )
-        await self.run_worker(entry_id, worker)
-        return worker
+        return await self.run_worker(entry_id, worker)
 
     async def bind_to_extensions(self):
         # TODO Refactor the hole binding thing
-        await self.entrypoint.bind_to_route(self)
         if self.dependencies:
             for name, dependency in self.dependencies.items():
                 await dependency.bind(self.runner.config) # TODO Maybe binding later to route only
-
-        if self.backoff is not None:
-            # Link this route to the given backoff class
-            await self.backoff.bind_route(self)
 
     async def stop(self):
         self.stopped = True
@@ -146,20 +157,6 @@ class CallbackRoute(Route):
         self.callback_target = callback_target
         self.callback_worker_class = callback_worker_class or self.callback_worker_class
 
-    async def handle_finished_callback_worker(self, entry_id, callback_worker):
-        await self.entrypoint.on_finished_route(
-            entry_id, worker=callback_worker.original_worker
-        )
-        if callback_worker.exception:
-            raise callback_worker.exception
-
-    async def callback_worker_result(self, entry_id, future):
-        logger.debug(f"{self} received a callback worker result.")
-        if future.exception():
-            raise future.exception()
-        callback_worker = future.result()
-        await self.handle_finished_callback_worker(entry_id, callback_worker)
-
     async def get_callback_worker_instance(self, original_worker):
         return self.callback_worker_class(
             self.callback_target, original_worker
@@ -168,24 +165,17 @@ class CallbackRoute(Route):
     async def start_callback_route(self, entry_id, worker):
         logger.info(f"{self.target} failed. Starting callback route.")
         callback_worker = await self.get_callback_worker_instance(worker)
-        callback = partial(self.callback_worker_result, entry_id)
-        await self.run_worker(entry_id, callback_worker, callback=callback)
-        return callback_worker
+        return await self.run_worker(entry_id, callback_worker)
 
     async def handle_finished_worker(self, entry_id, worker):
         # Callback route will only be called if retry is not valid.
-        if worker.exception:
-            can_retry =  self.backoff and await self.backoff.can_retry(worker)
-            if can_retry:
-                await self.backoff.retry(worker)
-                return await self.entrypoint.on_finished_route(entry_id, worker)
-        elif worker.exception and self.callback_target:
+        if worker is None:
+            return worker
+
+        if worker.exception and self.callback_target:
             logger.debug(
                 "Finished worker has an exception, calling callback route."
             )
-            await self.start_callback_route(entry_id, worker)
-            raise worker.exception
-        else:
-            await super(CallbackRoute, self).handle_finished_worker(
-                entry_id, worker
-            )
+            worker = await self.start_callback_route(entry_id, worker)
+
+        return super(CallbackRoute, self).handle_finished_worker(entry_id, worker)

@@ -24,6 +24,8 @@ class ConsumerManager(Extension, ConsumerMixin):
         self.message_lock = Lock()
         self.started = False
 
+    singleton = True
+
     @property
     def amqp_uri(self):
         return self.runner.config['AMQP_URI']
@@ -43,8 +45,8 @@ class ConsumerManager(Extension, ConsumerMixin):
 
     async def start(self):
         if not self.started:
-            self.run_thread = await self.runner.spawn_extension(self, self.run)
             self.started = True
+            await self.runner.spawn_extension(self, self.run)
 
     async def stop(self):
         if self.started:

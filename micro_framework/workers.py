@@ -1,11 +1,17 @@
+import asyncio
 import inspect
+import logging
 from concurrent.futures.process import _ExceptionWithTraceback
+from functools import partial
 from importlib import import_module
 
 from micro_framework.dependencies import Dependency
 
 
-def get_class_dependencies(_class, config):
+logger = logging.getLogger(__name__)
+
+
+async def get_class_dependencies(_class, config):
     dependencies = inspect.getmembers(
         _class, lambda x: isinstance(x, Dependency)
     )
@@ -42,75 +48,71 @@ class Worker:
         self.finished = False
         self._meta = _meta or {} # Content shared by extensions
 
-    def get_callable(self):
+    async def get_callable(self):
         *module, callable = self.target.split('.')
         callable = getattr(import_module('.'.join(module)), callable)
         return callable
 
-    def call_dependencies(self, dependencies, action, *args, **kwargs):
-        ret = {}
+    async def call_dependencies(self, dependencies, action, *args, **kwargs):
+        futures = []
+        event_loop = asyncio.get_event_loop()
+        names = []
         for name, dependency in dependencies.items():
-            ret[name] = getattr(dependency, action)(*args, **kwargs)
+            method = getattr(dependency, action)
+            fn = partial(method, *args, **kwargs)
+            futures.append(event_loop.run_in_executor(None, fn))
+            names.append(name)
+        results = await asyncio.gather(*futures)
+        ret = {name: result for name, result in zip(names, results)}
         return ret
 
-    def instanciate_class(self, _class, dependencies):
+    async def instanciate_class(self, _class, dependencies):
         instance = _class()
         for dependency_name, dependency in dependencies.items():
             setattr(instance, dependency_name, dependency)
         return instance
 
-    def call_task(self, fn, *fn_args, **fn_kwargs):
+    async def call_task(self, executor, fn, *fn_args, **fn_kwargs):
         try:
-            self.result = fn(*fn_args, **fn_kwargs)
-        except Exception as exc:
-            if self.config.get('WORKER_MODE', 'thread') == 'process' and not \
-                    isinstance(exc, _ExceptionWithTraceback):
-                # Trick from concurrent.futures to keep the traceback in
-                # process type worker.
-                self.exception = _ExceptionWithTraceback(exc, exc.__traceback__)
+            if inspect.iscoroutinefunction(fn):
+                self.result = await fn(*fn_args, **fn_kwargs)
             else:
-                self.exception = exc
+                func = partial(fn, *fn_args, **fn_kwargs)
+                event_loop = asyncio.get_event_loop()
+                self.result = await event_loop.run_in_executor(executor, func)
+        except Exception as exc:
+            self.exception = exc
+            logger.exception("")
 
-            self.call_dependencies(
-                self._dependencies, 'after_call', self, self.result, exc
-            )
-            self.call_dependencies(
-                self._class_dependencies, 'after_call', self, self.result, exc
-            )
-            return self.result
-
-        self.call_dependencies(
-            self._dependencies, 'after_call', self, self.result, None
-        )
-        self.call_dependencies(
-            self._class_dependencies, 'after_call', self, self.result, None
-        )
         return self.result
 
-    def run(self):
+    async def run(self, executor):
         callable = self.target
         if isinstance(self.target, str):
-            callable = self.get_callable()
+            callable = await self.get_callable()
 
         self._class_dependencies = {}
         if inspect.isclass(callable):
-            self._class_dependencies = get_class_dependencies(
+            self._class_dependencies = await get_class_dependencies(
                 callable, self.config
             )
 
+        # TODO Get dependencies from the function typing instead of the Route.
+        # Then we will call the bind from here, not in the Route.
+
         # Setup Dependency Providers
-        self.call_dependencies(
+        await self.call_dependencies(
             self._dependencies, 'setup_dependency', self
         )
-        self.call_dependencies(
+        await self.call_dependencies(
             self._class_dependencies, 'setup_dependency', self
         )
 
         # Obtaining Dependencies from Providers
-        dependencies = self.call_dependencies(
+        dependencies = await self.call_dependencies(
             self._dependencies, 'get_dependency', self
         )
-        class_dependencies = self.call_dependencies(
+        class_dependencies = await self.call_dependencies(
             self._class_dependencies, 'get_dependency', self
         )
 
@@ -118,24 +120,37 @@ class Worker:
         self.translated_args = self.fn_args
         self.translated_kwargs = self.fn_kwargs
         for translator in self._translators:
-            self.translated_args, self.translated_kwargs = translator.translate(
+            self.translated_args, self.translated_kwargs = await translator.translate(
                 *self.fn_args, **self.fn_kwargs
             )
 
         # Calling Before Call for the Dependency Providers
-        self.call_dependencies(self._dependencies, 'before_call', self)
-        self.call_dependencies(self._class_dependencies, 'before_call', self)
+        await self.call_dependencies(self._dependencies, 'before_call', self)
+        await self.call_dependencies(
+            self._class_dependencies, 'before_call', self
+        )
 
         function = callable
         if inspect.isclass(callable):
-            instance = self.instanciate_class(callable, class_dependencies)
+            instance = await self.instanciate_class(
+                callable, class_dependencies
+            )
 
             function = instance
             if self.method_name:
                 function = getattr(instance, self.method_name)
 
         fn_kwargs = {**self.translated_kwargs, **dependencies}
-        self.call_task(function, *self.translated_args, **fn_kwargs)
+        await self.call_task(
+            executor, function, *self.translated_args, **fn_kwargs
+        )
+        await self.call_dependencies(
+            self._dependencies, 'after_call', self, self.result, self.exception
+        )
+        await self.call_dependencies(
+            self._class_dependencies, 'after_call', self, self.result,
+            self.exception
+        )
         self.finished = True
         return self
 

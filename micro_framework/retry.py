@@ -8,6 +8,7 @@ from micro_framework.amqp.dependencies import dispatch
 from micro_framework.amqp.entrypoints import BaseEventListener
 from micro_framework.dependencies import Dependency
 from micro_framework.extensions import Extension
+from micro_framework.routes import Route
 
 logger = logging.getLogger(__name__)
 
@@ -139,9 +140,15 @@ class BackOff(Extension):
 
     async def execute_retry(self, updated_worker, next_interval):
         """
-        Hook method to implement the retry logic. Ex: AsyncBackOff bellow.
+        Hook method to implement the retry logic.
+
+        This method should return an updated version of the worker (
+        after the backoff was executed) or None for cases where the BackOff
+        task will be sent to another service to handle. Ex: AsyncBackOff bellow.
 
         :param Worker updated_worker: A Worker with updated BackOff _meta
+        :return Optional[Worker]: The Updated Worker with after backoff was
+        done. If the backoff is asynchronous, returns None
         """
         raise NotImplementedError()
 
@@ -161,10 +168,14 @@ class BackOff(Extension):
         meta['backoff'] = updated_context
         worker._meta = meta  # meta might be a reference so this is ambiguous
         logger.info(f"{worker.target} failed, sending retry action.")
-        await self.execute_retry(worker, next_interval)
+        return await self.execute_retry(worker, next_interval)
 
-    async def bind_route(self, route):
-        self.route = route
+    async def bind(self, runner, parent=None):
+        ext = await super(BackOff, self).bind(runner, parent=parent)
+        if not isinstance(parent, Route):
+            raise TypeError("A BackOff class can only be used inside a Route.")
+        ext.route = parent
+        return ext
 
 
 class AsyncBackOff(BackOff, BaseEventListener):
@@ -203,6 +214,7 @@ class AsyncBackOff(BackOff, BaseEventListener):
             exchange=exchange,
             headers={'x-delay': next_interval}
         )
+        return None
 
     async def bind_route(self, route):
         self.route = route._clone()

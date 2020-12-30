@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class PrometheusMetricServer(Extension):
+    def __init__(self):
+        self.started = False
+
     async def setup(self):
         self.config = self.runner.config['METRICS']
         self.enabled = self.runner.config['ENABLE_METRICS']
