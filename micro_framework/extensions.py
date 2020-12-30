@@ -11,6 +11,8 @@ class Extension:
     """
     _runner = None
     _params = None
+    singleton = False
+    parent = None
 
     def __new__(cls, *args, **kwargs):
         # Hack from Nameko's Extension to enable us to instantiate a new
@@ -19,35 +21,59 @@ class Extension:
         inst._params = (args, kwargs)
         return inst
 
-    def bind(self, runner):
+    async def bind(self, runner, parent=None):
         """
         Binds the extension to the service runner and parent.
         :param Runner runner: Service Runner
         """
         if self._runner is not None:
-            return self._runner
-            # TODO Letting all extensions being shareable will impact in
-            #  something?
-            #raise AssertionError("This extension is already bound.")
-        self._runner = runner
-        # Binding sub-extensions
-        for attr_name, extension in inspect.getmembers(
-                self, lambda x: isinstance(x, Extension)):
-            extension.bind(runner)
+            return self
 
-    def setup(self):
+
+        ext = self
+        if not self.singleton:
+            # We copy this extension to prevent some threading problems
+            ext = self._clone()
+            ext.parent = parent
+
+        else:
+            ext.parent = runner
+
+        ext._runner = runner
+
+        # Retrieve the extensions declared inside this extension
+        inner_extensions = inspect.getmembers(
+            ext, lambda x: isinstance(x, Extension) and x._runner is None
+        )
+        for attr_name, extension in inner_extensions:
+            if attr_name == "parent" or attr_name == "runner":
+                continue
+
+            if extension._runner is not None and extension.parent is not None:
+               # Cyclic referencing
+               continue
+
+            binded_ext = await extension.bind(runner, parent=ext)
+            try:
+                setattr(ext, attr_name, binded_ext)
+            except AttributeError:
+                continue
+
+        return ext
+
+    async def setup(self):
         """
         Called After the binding and before the system start
         """
         pass
 
-    def start(self):
+    async def start(self):
         """
         Commands the extension to start running.
         """
         pass
 
-    def stop(self):
+    async def stop(self):
         """
         Commands the extension to do a graceful stop
         """

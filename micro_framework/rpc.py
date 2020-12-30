@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 import micro_framework
 from micro_framework.dependencies import Dependency
 from micro_framework.exceptions import RPCTargetDoesNotExist, \
-    RPCException
+    RPCException, RPCAsyncResponse
 from micro_framework.extensions import Extension
 
 logger = logging.getLogger(__name__)
@@ -148,13 +148,14 @@ class RPCManagerMixin(Extension):
         - kwargs: Kwargs for the specific target.
 
     """
+    singleton = True
 
     def __init__(self):
         super(RPCManagerMixin, self).__init__()
         self.entrypoints = {}
 
-    def add_entrypoint(self, entrypoint):
-        target_detail = self.target_detail(entrypoint)
+    async def add_entrypoint(self, entrypoint):
+        target_detail = await self.target_detail(entrypoint)
         target_id = target_detail['target']
         if target_id in self.entrypoints:
             raise ValueError(
@@ -163,15 +164,17 @@ class RPCManagerMixin(Extension):
             )
         self.entrypoints[target_id] = entrypoint
 
-    def _parse_message(self, client, command, *args, **kwargs):
+    async def _parse_message(self, client, command, *args, **kwargs):
         try:
             method = getattr(self, command)
-            response = method(client, *args, **kwargs)
+            response = await method(client, *args, **kwargs)
         except AttributeError:
-            response = self.__call_target__(client, command, *args, **kwargs)
+            response = await self.__call_target__(
+                client, command, *args, **kwargs
+            )
         return response
 
-    def consume_message(self, client, message):
+    async def consume_message(self, client, message):
         """
         Consume the message, returning the method based on the rpc command.
 
@@ -187,14 +190,17 @@ class RPCManagerMixin(Extension):
         command_args = message.get('command_args', [])
         command_kwargs = message.get('command_kwargs', {})
         try:
-            response = self._parse_message(
+            response = await self._parse_message(
                 client, command, *command_args, **command_kwargs
             )
+        except RPCAsyncResponse:
+            return None
         except Exception as exc:
             return format_rpc_response(None, exc)
+
         return format_rpc_response(response)
 
-    def target_detail(self, entrypoint):
+    async def target_detail(self, entrypoint):
         """
         Return the Details of an entrypoint's target.
         :param Entrypoint entrypoint: Entrypoint
@@ -252,78 +258,25 @@ class RPCManagerMixin(Extension):
             'docstring': inspect.getdoc(target)
         }
 
-    def __list_targets__(self, client):
+    async def __list_targets__(self, client):
         """
         List all available targets by iterating through the entrypoints.
         :param client: RPC Client
         :return list: All available Entrypoints's target
         """
         return [
-            self.target_detail(entrypoint)
+            await self.target_detail(entrypoint)
             for entrypoint in self.entrypoints.values()
         ]
 
-    def __get_target__(self, client, target):
+    async def __get_target__(self, client, target):
         """
         Return details from an specific entrypoint target.
         :param client: RPC Client
         :param target: target rpc identification
         :return dict: Target detail
         """
-        return self.target_detail(self.entrypoints[target])
-
-    def __call_target__(self, client, target, *args, **kwargs):
-        """
-        Call the entrypoint's route by using the target name.
-        :param client: RPC Client
-        :param str target: Entrypoint Identification
-        :param dict data:
-        :return:
-        """
-        if target not in self.entrypoints:
-            raise RPCTargetDoesNotExist(
-                f"{target} does not exist or is not exposed through a "
-                f"RPC method."
-            )
-        entrypoint = self.entrypoints[target]
-        self.call_entrypoint(client, entrypoint, *args, **kwargs)
-
-
-class AsyncRPCManagerMixin(RPCManagerMixin):
-    async def _parse_message(self, client, command, *args, **kwargs):
-        try:
-            method = getattr(self, command)
-            response = method(client, *args, **kwargs)
-        except AttributeError:
-            response = await self.__call_target__(
-                client, command, *args, **kwargs
-            )
-        return response
-
-    async def consume_message(self, client, message):
-        """
-        Consume the message, returning the method based on the rpc command.
-
-        If the command is to call a route, then it should return None,
-        since the route will spawn a worker, running in parallel.
-
-        :param client: Client to identify the caller
-        :param str message: RPC Message
-        :return str: RPC Response
-       """
-        message = json.loads(message)
-        command = message['command']
-        command_args = message.get('command_args', [])
-        command_kwargs = message.get('command_kwargs', {})
-        try:
-            response = await self._parse_message(
-                client, command, *command_args, **command_kwargs
-            )
-        except Exception as exc:
-            return format_rpc_response(None, exc)
-        if response:
-            response = format_rpc_response(response)
-        return response
+        return await self.target_detail(self.entrypoints[target])
 
     async def __call_target__(self, client, target, *args, **kwargs):
         """
@@ -340,6 +293,9 @@ class AsyncRPCManagerMixin(RPCManagerMixin):
             )
         entrypoint = self.entrypoints[target]
         await self.call_entrypoint(client, entrypoint, *args, **kwargs)
+        # Then we raise this exception to tell the calling method to ignore
+        # this response. (Since returning None could be the desired response)
+        raise RPCAsyncResponse()
 
 
 class RPCTarget:
@@ -564,8 +520,8 @@ class RPCDependency(RPCDependencyMixin, Dependency):
             "name": None
         }
 
-    def setup(self):
-        super(RPCDependencyMixin, self).setup()
+    def setup_dependency(self, worker):
+        super(RPCDependencyMixin, self).setup_dependency(worker)
         self.targets = self.list_targets() or []
 
     def get_dependency(self, worker):

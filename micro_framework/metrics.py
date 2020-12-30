@@ -2,26 +2,30 @@ import logging
 from wsgiref.simple_server import make_server
 
 from prometheus_client import make_wsgi_app, REGISTRY, Gauge, Counter, Summary, \
-    Info
+    Info, make_asgi_app
 from prometheus_client.exposition import ThreadingWSGIServer, _SilentHandler
-
+import uvicorn
 from micro_framework.extensions import Extension
 
 logger = logging.getLogger(__name__)
 
 
 class PrometheusMetricServer(Extension):
-    def setup(self):
+    def __init__(self):
+        self.started = False
+
+    async def setup(self):
         self.config = self.runner.config['METRICS']
         self.enabled = self.runner.config['ENABLE_METRICS']
         self.started = False
 
-    def start(self):
+    async def start(self):
         """
         Starts a WSGI server exactly like prometheus_client.start_http_server
         except that we use our runner to spawn the task instead of a Thread
         alone.
         """
+        # TODO Change to uvicorn
         if self.enabled:
             app = make_wsgi_app(REGISTRY)
             self.httpd = make_server(
@@ -36,9 +40,11 @@ class PrometheusMetricServer(Extension):
                 f" {self.config['HOST']}:{self.config['PORT']}"
             )
             self.started = True
-            self.httpd.serve_forever()
+            self.task = self.runner.event_loop.run_in_executor(
+                None, self.httpd.serve_forever
+            )
 
-    def stop(self):
+    async def stop(self):
         if self.started:
             self.httpd.shutdown()
 

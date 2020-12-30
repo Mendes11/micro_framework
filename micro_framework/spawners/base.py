@@ -10,7 +10,7 @@ class Spawner:
     Mixin to Executors
     """
 
-    def spawn(self, target_fn, callback, *fn_args, **fn_kwargs):
+    def spawn(self, target_fn, *fn_args, callback=None, **fn_kwargs):
         fn_args = fn_args or tuple()
         fn_kwargs = fn_kwargs or dict()
         logger.debug(f"Spawning {target_fn.__name__}")

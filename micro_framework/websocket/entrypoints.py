@@ -1,5 +1,3 @@
-from functools import partial
-
 from micro_framework.entrypoints import Entrypoint
 from micro_framework.exceptions import FrameworkException, MaxConnectionsReached
 from micro_framework.websocket.manager import WebSocketManager
@@ -19,22 +17,19 @@ class WebSocketEntrypoint(Entrypoint):
         """
         if self.runner.available_workers <= 0:
             raise MaxConnectionsReached("No Available Workers")
-        self.runner.event_loop.run_in_executor(
-            None,
-            func=partial(self.call_route, websocket, *args, **kwargs)
-        )
+        await self.call_route(websocket, *args, **kwargs)
 
-    def on_finished_route(self, entry_id, worker):
-        self.manager.send_to_client(
+    async def on_finished_route(self, entry_id, worker):
+        await self.manager.send_to_client(
             entry_id, data=worker.result, exception=worker.exception
         )
 
-    def on_failure(self, entry_id):
+    async def on_failure(self, entry_id):
         exception = FrameworkException("RPC Server failed unexpectedly.")
-        self.manager.send_to_client(
+        await self.manager.send_to_client(
             entry_id, data=None, exception=exception
         )
 
-    def setup(self):
-        super(WebSocketEntrypoint, self).setup()
-        self.manager.add_entrypoint(self)
+    async def setup(self):
+        await super(WebSocketEntrypoint, self).setup()
+        await self.manager.add_entrypoint(self)

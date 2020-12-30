@@ -140,6 +140,9 @@ class ProcessSpawner(Spawner, _base.Executor):
             self.shutdown_pool = True
         self.read_queue.put(None)
         self._queue_handler_task.join()
+        self.read_queue.close()
+        self.write_queue.close()
+        self.call_queue.close()
         logger.info("Pool Stopped.")
 
     def _send_task_to_process(self):
@@ -203,9 +206,6 @@ class ProcessSpawner(Spawner, _base.Executor):
             result = self._read_task_result()
             with self.shutdown_lock:
                 if self.shutdown_pool and not result:
-                    self.read_queue.close()
-                    self.write_queue.close()
-                    self.call_queue.close()
                     return
 
 
