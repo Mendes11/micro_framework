@@ -11,31 +11,55 @@ class Extension:
     """
     _runner = None
     _params = None
-    singleton = False
+    context_singleton = False # Unique to the RunnerContext.
+    singleton = False # Unique to the whole service.
     parent = None
+    _extensions = set()
+
 
     def __new__(cls, *args, **kwargs):
         # Hack from Nameko's Extension to enable us to instantiate a new
         # Extension on Bind independent of the arguments it has on __init__
         inst = super(Extension, cls).__new__(cls)
         inst._params = (args, kwargs)
+
+        # This could be on init, but since i'm using __new__ already...
+        inst._runner = None
+        inst.parent = None
+        inst._extensions = set()
+
         return inst
+
+    async def bind_new_extension(self, attr_name, extension, runner, parent):
+        binded_ext = await extension.bind(runner, parent=parent)
+        parent._extensions.add(binded_ext)
+        try:
+            setattr(parent, attr_name, binded_ext)
+        except AttributeError:
+            pass
+        return binded_ext
 
     async def bind(self, runner, parent=None):
         """
         Binds the extension to the service runner and parent.
         :param Runner runner: Service Runner
         """
-        if self._runner is not None:
+        if self.context_singleton and type(self) in runner.context_singletons:
+            return runner.context_singletons[type(self)]
+
+        if self.singleton and type(self) in runner.singletons:
+            return runner.singletons[type(self)]
+
+        if self._runner == runner:
             return self
 
-
         ext = self
-        if not self.singleton:
+        if (not self.context_singleton or self._runner != runner) and not self.singleton:
+            # The context singletons are a singleton only in the same runner
+            # context.
             # We copy this extension to prevent some threading problems
             ext = self._clone()
             ext.parent = parent
-
         else:
             ext.parent = runner
 
@@ -46,19 +70,17 @@ class Extension:
             ext, lambda x: isinstance(x, Extension) and x._runner is None
         )
         for attr_name, extension in inner_extensions:
+            extension = getattr(ext, attr_name)
             if attr_name == "parent" or attr_name == "runner":
                 continue
 
-            if extension._runner is not None and extension.parent is not None:
+            if extension._runner == runner:
                # Cyclic referencing
                continue
 
-            binded_ext = await extension.bind(runner, parent=ext)
-            try:
-                setattr(ext, attr_name, binded_ext)
-            except AttributeError:
-                continue
-
+            # Bind this extension to this binded extension.
+            await ext.bind_new_extension(attr_name, extension, runner, ext)
+        await runner.register_extension(ext)
         return ext
 
     async def setup(self):

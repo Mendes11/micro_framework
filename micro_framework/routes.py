@@ -5,6 +5,7 @@ from functools import partial
 
 from micro_framework.exceptions import ExtensionIsStopped
 from micro_framework.extensions import Extension
+from micro_framework.targets import new_target
 from micro_framework.workers import Worker, CallbackWorker
 
 logger = logging.getLogger(__name__)
@@ -17,20 +18,16 @@ class Route(Extension):
     Protocol-Specific routes should implement this class and extend its
     features.
 
-    In order to keep the framework code decoupled from the to-be executed
-    functions, we pass only the path of the function so it will be imported
-    only when a new worker is spawned, making any setup from imports and etc
-    (Django i'm looking to you) run in the spawned worker.
     """
     worker_class = Worker
 
-    def __init__(self, target, entrypoint, dependencies=None,
-                 translators=None, worker_class=None, backoff=None,
-                 method_name=None, metric_label=None):
+    def __init__(
+            self, target, entrypoint, translators=None,
+            worker_class=None, backoff=None, method_name=None,
+            metric_label=None):
+        self.target = new_target(target, method_name=method_name)
         self._entrypoint = entrypoint
-        self._dependencies = dependencies or {}
         self._translators = translators or []
-        self._target = target
         self._method_name = method_name
         self.stopped = False
         self.current_workers = {}
@@ -71,9 +68,8 @@ class Route(Extension):
 
     async def get_worker_instance(self, *fn_args, _meta=None, **fn_kwargs):
         return self.worker_class(
-            self.target, self.dependencies.copy(),
-            self.translators.copy(), self.runner.config, *fn_args, _meta=_meta,
-            method_name=self.method_name, **fn_kwargs
+            self.target, self.translators.copy(), self.runner.config,
+            *fn_args, _meta=_meta, **fn_kwargs
         )
 
     async def run_worker(self, entry_id, worker):
@@ -97,26 +93,8 @@ class Route(Extension):
         )
         return await self.run_worker(entry_id, worker)
 
-    async def bind_to_extensions(self):
-        # TODO Refactor the hole binding thing
-        if self.dependencies:
-            for name, dependency in self.dependencies.items():
-                await dependency.bind(self.runner.config) # TODO Maybe binding later to route only
-
     async def stop(self):
         self.stopped = True
-
-    @property
-    def dependencies(self):
-        return self._dependencies
-
-    @property
-    def target(self):
-        return self._target
-
-    @property
-    def method_name(self):
-        return self._method_name
 
     @property
     def translators(self):
@@ -135,20 +113,16 @@ class Route(Extension):
         return self._metric_label or self.__str__().replace(" -> ", "__")
 
     def __str__(self):
-        target = self.target
-        if inspect.isfunction(target):
-            target = target.__name__
-        elif inspect.isclass(target):
-            target = "{}.{}".format(target.__name__.lower(), self.method_name)
-        elif self.method_name:
-            target = "{}.{}".format(target, self.method_name)
+        target = str(self.target)
         return f'{self.__class__.__name__} -> {target}'
 
     def __repr__(self):
-        return self.__str__()
+        target = str(self.target)
+        return "< {} -> {} >".format(self.__class__.__name__, target)
 
 
 class CallbackRoute(Route):
+    # FIXME This don't work anymore. Refactor with the target classes.
     callback_worker_class = CallbackWorker
 
     def __init__(self, *args, callback_target,

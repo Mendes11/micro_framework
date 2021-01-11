@@ -1,14 +1,10 @@
-import asyncio
-import json
-from concurrent.futures.thread import ThreadPoolExecutor
-
-from micro_framework.rpc import RPCDependency
-from micro_framework.websocket.client import WebSocketConnection
+from micro_framework.rpc.dependencies import RPCDependency
+from micro_framework.websocket.connectors import WebSocketConnection
 from micro_framework.websocket.rpc import WSRPCProxy
 
 
 class WebSocketRPCClient(RPCDependency):
-    connection_class = WebSocketConnection
+    connector_class = WebSocketConnection
     proxy_class = WSRPCProxy
 
     def __init__(self, address, port, timeout=None):
@@ -16,7 +12,7 @@ class WebSocketRPCClient(RPCDependency):
         self.port = port
         self.timeout = timeout
 
-    def get_connection_kwargs(self):
+    def get_connector_kwargs(self):
         return {
             'uri': f"ws://{self.address}:{self.port}", 'timeout': self.timeout
         }

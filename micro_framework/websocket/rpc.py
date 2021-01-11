@@ -3,9 +3,9 @@ import time
 
 import websockets
 
+import micro_framework.amqp.amqp_elements
 from micro_framework.exceptions import MaxConnectionsReached
-from micro_framework.rpc import RPCTarget, parse_rpc_response, RPCProxy, \
-    format_rpc_command, RPCClient
+from micro_framework.rpc import RPCTarget, parse_rpc_response, RPCProxy
 
 
 class WSRPCTarget(RPCTarget):
@@ -18,7 +18,7 @@ class WSRPCTarget(RPCTarget):
             # and therefore we have multiple WebSocket servers, with some empty
             # and others not.
 
-            with client.get_connection() as connection:
+            with micro_framework.amqp.amqp_elements.get_connection() as connection:
                 connection.send(message)
                 result_message = connection.recv()
             result = parse_rpc_response(result_message)

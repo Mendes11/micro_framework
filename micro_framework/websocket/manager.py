@@ -47,9 +47,6 @@ class WebSocketManager(RPCManagerMixin, WebSocketServer):
         if response:
             await self.send(websocket, response)
 
-    async def call_entrypoint(self, websocket, entrypoint, *args, **kwargs):
-        await entrypoint.handle_message(websocket, *args, **kwargs)
-
     async def send_to_client(self, websocket, data, exception=None):
         """
         Send back to the client outside the event-loop.
