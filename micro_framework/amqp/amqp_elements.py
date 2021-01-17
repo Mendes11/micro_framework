@@ -119,7 +119,7 @@ def get_producer(amqp_uri, confirms=True, ssl=None, transport_options=None):
         yield producer
 
 
-class Publisher(RPCConnection):
+class Publisher:
     """
     Utility helper for publishing messages to RabbitMQ.
 
