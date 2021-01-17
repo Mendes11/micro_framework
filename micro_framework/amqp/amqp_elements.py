@@ -10,6 +10,16 @@ from micro_framework.rpc import RPCConnection
 from micro_framework.targets import Target
 
 rpc_exchange_name = "ufw-rpc"
+DEFAULT_TRANSPORT_OPTIONS = {
+    'max_retries': 3,
+    'interval_start': 2,
+    'interval_step': 1,
+    'interval_max': 5
+}
+DEFAULT_RETRY_POLICY = {'max_retries': 3}
+DEFAULT_HEARTBEAT = 60
+DEFAULT_SERIALIZER = 'json'
+PERSISTENT = 2
 
 
 def event_queue_name(event_name: str, source_service: str, service_name: str,
@@ -98,18 +108,6 @@ def get_connection(amqp_uri):
     return connection
 
 
-DEFAULT_TRANSPORT_OPTIONS = {
-    'max_retries': 3,
-    'interval_start': 2,
-    'interval_step': 1,
-    'interval_max': 5
-}
-DEFAULT_RETRY_POLICY = {'max_retries': 3}
-DEFAULT_HEARTBEAT = 60
-DEFAULT_SERIALIZER = 'json'
-PERSISTENT = 2
-
-
 @contextmanager
 def get_producer(amqp_uri, confirms=True, ssl=None, transport_options=None):
     if transport_options is None:
@@ -124,6 +122,17 @@ def get_producer(amqp_uri, confirms=True, ssl=None, transport_options=None):
 class Publisher(RPCConnection):
     """
     Utility helper for publishing messages to RabbitMQ.
+
+    ################### IMPORTANT NOTE #############################
+    #                                                              #
+    #   THIS CLASS WAS (NOT PROUDLY) TAKEN FROM NAMEKO PROJECT     #
+    #                                                              #
+    #    Don't know why, but my implementation wasn't              #
+    #    working properly                                          #
+    #                                                              #
+    ################################################################
+
+    ref: https://github.com/nameko/nameko/blob/a719cb1487f643769e2d13daf255c20551490f43/nameko/amqp/publish.py#L40
     """
 
     use_confirms = True
