@@ -1,256 +1,108 @@
-from contextlib import contextmanager
+import logging
+import multiprocessing
 
-import json
+from micro_framework.amqp.amqp_elements import rpc_reply_queue, rpc_exchange
+from micro_framework.amqp.entrypoints import BaseEventListener
 
-import uuid
-import warnings
-from amqp import ChannelError
-from kombu import Connection
-from kombu.pools import producers
-
-from micro_framework.amqp.amqp_elements import rpc_exchange, \
-    rpc_broadcast_routing_key, rpc_routing_key
-from micro_framework.amqp.manager import RPCManager
-from micro_framework.exceptions import RPCTargetDoesNotExist
-from micro_framework.rpc import RPCConnection
-
-DEFAULT_TRANSPORT_OPTIONS = {
-    'max_retries': 3,
-    'interval_start': 2,
-    'interval_step': 1,
-    'interval_max': 5
-}
-DEFAULT_RETRY_POLICY = {'max_retries': 3}
-DEFAULT_HEARTBEAT = 60
-DEFAULT_SERIALIZER = 'json'
-PERSISTENT = 2
+logger = logging.getLogger(__name__)
 
 
-@contextmanager
-def get_producer(amqp_uri, confirms=True, ssl=None, transport_options=None):
-    if transport_options is None:
-        transport_options = DEFAULT_TRANSPORT_OPTIONS.copy()
-    transport_options['confirm_publish'] = confirms
-    conn = Connection(amqp_uri, transport_options=transport_options, ssl=ssl)
-
-    with producers[conn].acquire(block=True) as producer:
-        yield producer
-
-
-
-class Publisher(RPCConnection):
+class ListenerReceiver:
     """
-    Utility helper for publishing messages to RabbitMQ.
+    Implements a method to receive from the Reply EventListener's connection
+    instance with a timeout possibility.
+
+    When the timeout is reached, it raises TimeoutError.
+
+    This class is usually created by the RPCConnection when it sends a new
+    rpc message to the broker and notify the Reply-Listener to send the reply
+    to a specific multiprocess.Connection instance.
+
     """
 
-    use_confirms = True
+    def __init__(self, connection):
+        self.connection = connection
+
+    def result(self, timeout=None):
+        if timeout is not None:
+            if self.connection.poll(timeout=timeout):
+                return self.connection.recv()
+            raise TimeoutError()
+        while not self.connection.poll(timeout=.5):
+            pass
+        return self.connection.recv()
+
+
+m = multiprocessing.Manager()
+_correlations_queue = m.Queue()
+lock = m.Lock()
+_correlation_ids = m.dict()
+
+
+def listen_to_correlation(correlation_id):
+    global _correlation_ids
+    receiver, sender = multiprocessing.Pipe(duplex=False)
+    with lock:
+        _correlation_ids[correlation_id] = sender
+    return ListenerReceiver(receiver)
+
+
+class RPCReplyListener(BaseEventListener):
     """
-    Enable `confirms <http://www.rabbitmq.com/confirms.html>`_ for this
-    publisher.
-    The publisher will wait for an acknowledgement from the broker that
-    the message was receieved and processed appropriately, and otherwise
-    raise. Confirms have a performance penalty but guarantee that messages
-    aren't lost, for example due to stale connections.
+    Listens to any RPCReply for this service
     """
+    singleton = True
+    internal = True
 
-    transport_options = DEFAULT_TRANSPORT_OPTIONS.copy()
-    """
-    A dict of additional connection arguments to pass to alternate kombu
-    channel implementations. Consult the transport documentation for
-    available options.
-    """
+    async def setup(self):
+        self._reply_queue = rpc_reply_queue()
+        self.routing_key = self._reply_queue.routing_key
+        await super(RPCReplyListener, self).setup()
 
-    delivery_mode = PERSISTENT
-    """
-    Default delivery mode for messages published by this Publisher.
-    """
+    async def get_exchange(self):
+        return rpc_exchange()
 
-    mandatory = False
-    """
-    Require `mandatory <https://www.rabbitmq.com/amqp-0-9-1-reference.html
-    #basic.publish.mandatory>`_ delivery for published messages.
-    """
+    async def get_queue(self):
+        return self._reply_queue
 
-    priority = 0
-    """
-    Priority value for published messages, to be used in conjunction with
-    `consumer priorities <https://www.rabbitmq.com/priority.html>_`.
-    """
+    async def read_correlations_queue(self):
+        global _correlation_ids
+        while not _correlations_queue.empty():
+            sender, corr_id = _correlations_queue.get_nowait()
+            with lock:
+                _correlation_ids[corr_id] = sender
 
-    expiration = None
-    """
-    `Per-message TTL <https://www.rabbitmq.com/ttl.html>`_, in milliseconds.
-    """
+    async def call_route(self, entry_id, *args, _meta=None, **kwargs):
+        global _correlation_ids
+        # Any exception here will make the manager requeue the message
+        # First we update our correlation_ids dict by emptying the
+        # correlations_queue.
+        # await self.read_correlations_queue()
+        try:
+            corr_id = entry_id.properties["correlation_id"]
+        except KeyError:
+            logger.error("Received a reply with no registered correlation_id")
+            return
 
-    serializer = "json"
-    """ Name of the serializer to use when publishing messages.
-    Must be registered as a
-    `kombu serializer <http://bit.do/kombu_serialization>`_.
-    """
-
-    compression = None
-    """ Name of the compression to use when publishing messages.
-    Must be registered as a
-    `kombu compression utility <http://bit.do/kombu-compression>`_.
-    """
-
-    retry = True
-    """
-    Enable automatic retries when publishing a message that fails due
-    to a connection error.
-    Retries according to :attr:`self.retry_policy`.
-    """
-
-    retry_policy = DEFAULT_RETRY_POLICY
-    """
-    Policy to apply when retrying message publishes, if requested.
-    See :attr:`self.retry`.
-    """
-
-    declare = []
-    """
-    Kombu :class:`~kombu.messaging.Queue` or :class:`~kombu.messaging.Exchange`
-    objects to (re)declare before publishing a message.
-    """
-
-    def __init__(
-        self, amqp_uri, use_confirms=None, serializer=None, compression=None,
-        delivery_mode=None, mandatory=None, priority=None, expiration=None,
-        declare=None, retry=None, retry_policy=None, ssl=None,
-        reply_to_queue=None, target_service=None, **publish_kwargs
-    ):
-        self.amqp_uri = amqp_uri
-        self.ssl = ssl
-
-        # publish confirms
-        if use_confirms is not None:
-            self.use_confirms = use_confirms
-
-        # delivery options
-        if delivery_mode is not None:
-            self.delivery_mode = delivery_mode
-        if mandatory is not None:
-            self.mandatory = mandatory
-        if priority is not None:
-            self.priority = priority
-        if expiration is not None:
-            self.expiration = expiration
-
-        # message options
-        if serializer is not None:
-            self.serializer = serializer
-        if compression is not None:
-            self.compression = compression
-
-        # retry policy
-        if retry is not None:
-            self.retry = retry
-        if retry_policy is not None:
-            self.retry_policy = retry_policy
-
-        # declarations
-        if declare is not None:
-            self.declare = declare
-
-        self.reply_to_queue = reply_to_queue
-        self.target_service = target_service
-        # other publish arguments
-        self.publish_kwargs = publish_kwargs
-
-    def publish(self, payload, **kwargs):
-        """ Publish a message.
-        """
-        publish_kwargs = self.publish_kwargs.copy()
-
-        # merge headers from when the publisher was instantiated
-        # with any provided now; "extra" headers always win
-        headers = publish_kwargs.pop('headers', {}).copy()
-        headers.update(kwargs.pop('headers', {}))
-        headers.update(kwargs.pop('extra_headers', {}))
-
-        use_confirms = kwargs.pop('use_confirms', self.use_confirms)
-        transport_options = kwargs.pop('transport_options',
-                                       self.transport_options
-                                       )
-        transport_options['confirm_publish'] = use_confirms
-
-        delivery_mode = kwargs.pop('delivery_mode', self.delivery_mode)
-        mandatory = kwargs.pop('mandatory', self.mandatory)
-        priority = kwargs.pop('priority', self.priority)
-        expiration = kwargs.pop('expiration', self.expiration)
-        serializer = kwargs.pop('serializer', self.serializer)
-        compression = kwargs.pop('compression', self.compression)
-        retry = kwargs.pop('retry', self.retry)
-        retry_policy = kwargs.pop('retry_policy', self.retry_policy)
-
-        declare = self.declare[:]
-        declare.extend(kwargs.pop('declare', ()))
-
-        publish_kwargs.update(kwargs)  # remaining publish-time kwargs win
-
-        with get_producer(self.amqp_uri,
-                          use_confirms,
-                          self.ssl,
-                          transport_options,
-                          ) as producer:
-            try:
-                producer.publish(
-                    payload,
-                    headers=headers,
-                    delivery_mode=delivery_mode,
-                    mandatory=mandatory,
-                    priority=priority,
-                    expiration=expiration,
-                    compression=compression,
-                    declare=declare,
-                    retry=retry,
-                    retry_policy=retry_policy,
-                    serializer=serializer,
-                    **publish_kwargs
+        body = args[0]
+        try:
+            if corr_id in _correlation_ids:
+                with lock:
+                    sender = _correlation_ids.pop(corr_id)
+                if not sender.closed and sender.writable:
+                    sender.send(body)
+                else:
+                    logger.error(
+                        "Sender is closed or not writable.{}, {}".format(
+                            sender.closed, sender.writable)
+                    )
+            else:
+                logger.error(
+                    "Correlation id: {} not found on "
+                    "_correlation_ids dict.".format(corr_id)
                 )
-            except ChannelError as exc:
-                if "NO_ROUTE" in str(exc):
-                    raise RPCTargetDoesNotExist()
-                raise
-
-            if mandatory and not use_confirms:
-                warnings.warn(
-                    "Mandatory delivery was requested, but "
-                    "unroutable messages cannot be detected without "
-                    "publish confirms enabled."
-                )
-
-    def send(self, payload, *args, **kwargs):
-        payload = json.loads(payload)
-        exchange = rpc_exchange()
-        target_id = payload["command"]
-        if target_id in RPCManager.internal_commands:
-            routing_key = rpc_broadcast_routing_key(
-                self.target_service, target_id
+        except Exception:
+            logger.exception(
+                "Error with ReplyListener when returning an answer from a "
+                "RPC call."
             )
-        else:
-            routing_key = rpc_routing_key(
-                self.target_service, target_id=target_id
-            )
-        self.publish(
-            payload, routing_key=routing_key, exchange=exchange,
-            **kwargs
-        )
-
-    def send_and_receive(self, *args, **kwargs):
-        corr_id = str(uuid.uuid4())
-        timeout = kwargs.pop("timeout", None)
-
-        # Notify our reply listener of a new correlation_id that will have
-        # ListenerReceiver.
-        from micro_framework.amqp.dependencies import listen_to_correlation
-        receiver = listen_to_correlation(corr_id)
-        self.send(
-            *args, correlation_id=corr_id,
-            reply_to=self.reply_to_queue.routing_key,
-            mandatory=True,
-
-            **kwargs
-        )
-        result = receiver.result(timeout=timeout)
-        return result
