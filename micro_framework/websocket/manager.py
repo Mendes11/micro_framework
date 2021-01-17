@@ -20,6 +20,9 @@ class WebSocketManager(RPCManagerMixin, WebSocketServer):
         super(WebSocketManager, self).__init__()
         self.started = False
 
+    singleton = True
+    context_singleton = False
+
     async def setup(self):
         logger.debug("Setup WebSocket Manager.")
 

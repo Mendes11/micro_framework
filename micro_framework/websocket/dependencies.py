@@ -1,10 +1,10 @@
 from micro_framework.rpc.dependencies import RPCDependency
-from micro_framework.websocket.connectors import WebSocketConnection
+from micro_framework.websocket.connectors import WebSocketConnector
 from micro_framework.websocket.rpc import WSRPCProxy
 
 
 class WebSocketRPCClient(RPCDependency):
-    connector_class = WebSocketConnection
+    connector_class = WebSocketConnector
     proxy_class = WSRPCProxy
 
     def __init__(self, address, port, timeout=None):

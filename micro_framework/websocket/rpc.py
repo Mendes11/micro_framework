@@ -18,9 +18,8 @@ class WSRPCTarget(RPCTarget):
             # and therefore we have multiple WebSocket servers, with some empty
             # and others not.
 
-            with micro_framework.amqp.amqp_elements.get_connection() as connection:
-                connection.send(message)
-                result_message = connection.recv()
+            connection = self.connector.get_connection()
+            result_message = connection.send_and_receive(message)
             result = parse_rpc_response(result_message)
             if isinstance(result, MaxConnectionsReached):
                 time.sleep(0.5)  # TODO Is there any better way?
