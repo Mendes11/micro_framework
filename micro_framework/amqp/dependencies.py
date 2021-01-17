@@ -85,10 +85,10 @@ _correlation_ids = m.dict()
 
 def listen_to_correlation(correlation_id):
     global _correlation_ids
+    receiver, sender = multiprocessing.Pipe(duplex=False)
     with lock:
-        receiver, sender = multiprocessing.Pipe(duplex=False)
         _correlation_ids[correlation_id] = sender
-        return ListenerReceiver(receiver)
+    return ListenerReceiver(receiver)
 
 
 class RPCReplyListener(BaseEventListener):

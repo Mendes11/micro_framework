@@ -34,6 +34,8 @@ class ListenerReceiver:
             if self.connection.poll(timeout=timeout):
                 return self.connection.recv()
             raise TimeoutError()
+        while not self.connection.poll(timeout=.5):
+            pass
         return self.connection.recv()
 
 

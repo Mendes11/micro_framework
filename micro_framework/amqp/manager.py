@@ -129,6 +129,7 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
         super(RPCManager, self).__init__()
         self.connection = None
         self.started = False
+        self.message_lock = Lock()
 
     context_singleton = True
 
@@ -176,13 +177,13 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
             Consumer(
                 queues=queues,
                 callbacks=callbacks,
-                no_ack=True,
+                no_ack=False,
                 prefetch_count=self.runner.max_workers
             ),
             Consumer(
                 queues=[broadcast_queue],
                 callbacks=[self.on_broadcast_message],
-                no_ack=True,
+                no_ack=False,
             )
         ]
 
