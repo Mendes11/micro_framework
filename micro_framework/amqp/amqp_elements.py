@@ -88,9 +88,10 @@ def rpc_reply_queue() -> Queue:
     :return Queue: The RPC Reply Queue.
     """
     exchange = rpc_exchange()
+    name = f"ufw-reply-{uuid.uuid4()}"
     return Queue(
-        f"ufw-reply", exchange=exchange,
-        routing_key=f"ufw-reply-{uuid.uuid4()}", message_ttl=3600 * 24,
+        name, exchange=exchange,
+        routing_key=name, message_ttl=3600 * 24,
         auto_delete=True
     )
 
