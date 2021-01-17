@@ -20,6 +20,9 @@ class WebSocketManager(RPCManagerMixin, WebSocketServer):
         super(WebSocketManager, self).__init__()
         self.started = False
 
+    singleton = True
+    context_singleton = False
+
     async def setup(self):
         logger.debug("Setup WebSocket Manager.")
 
@@ -46,9 +49,6 @@ class WebSocketManager(RPCManagerMixin, WebSocketServer):
         response = await self.consume_message(websocket, message)
         if response:
             await self.send(websocket, response)
-
-    async def call_entrypoint(self, websocket, entrypoint, *args, **kwargs):
-        await entrypoint.handle_message(websocket, *args, **kwargs)
 
     async def send_to_client(self, websocket, data, exception=None):
         """

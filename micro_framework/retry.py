@@ -4,6 +4,7 @@ from datetime import datetime
 
 from kombu import Exchange, Queue
 
+from micro_framework.amqp.connectors import PublisherClient
 from micro_framework.amqp.dependencies import dispatch
 from micro_framework.amqp.entrypoints import BaseEventListener
 from micro_framework.dependencies import Dependency
@@ -205,14 +206,9 @@ class AsyncBackOff(BackOff, BaseEventListener):
         retry_payload = await self.mount_backoff_payload(updated_worker)
         event_name = await self.get_event_name()
         exchange = await self.get_exchange()
-
         dispatch(
-            self.runner.config['AMQP_URI'],
-            self.service_name,
-            event_name,
-            retry_payload,
-            exchange=exchange,
-            headers={'x-delay': next_interval}
+            self.runner.config["AMQP_URI"], exchange, event_name,
+            retry_payload, headers={"x-delay": next_interval}
         )
         return None
 

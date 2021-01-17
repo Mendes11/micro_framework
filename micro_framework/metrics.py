@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 class PrometheusMetricServer(Extension):
+    singleton = True
+
     def __init__(self):
         self.started = False
 

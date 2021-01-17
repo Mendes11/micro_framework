@@ -47,6 +47,7 @@ class RunnerContext:
         self.spawned_extensions = {}
         self.entrypoints = set()
         self.extra_extensions = set()
+        self.context_singletons = {} # {type: instance}
         self.metric_label = context_metric_label or f"context_{id(self)}"
         self.running_routes = 0
 
@@ -65,7 +66,7 @@ class RunnerContext:
             self.max_tasks_per_child = self.config["MAX_TASKS_PER_CHILD"]
 
         await self.bind_routes()
-        await self._find_extensions()
+        # await self._find_extensions()
         logger.debug(f"Extensions: {self.extensions}")
 
         info.labels(self.metric_label).info(
@@ -103,10 +104,23 @@ class RunnerContext:
         self.routes = binded_routes
 
     async def register_extension(self, extension):
-        if isinstance(extension, Entrypoint):
+        if isinstance(extension, Entrypoint) and not extension.singleton:
             self.entrypoints.add(extension)
         else:
             self.extra_extensions.add(extension)
+
+        if extension.context_singleton:
+            existing = self.context_singletons.get(type(extension))
+            if existing is not None and existing != extension:
+                raise TypeError(
+                    "Extension {} is a context singleton and already has a "
+                    "registered Extension: {}".format(
+                        extension, existing
+                    )
+                )
+            self.context_singletons[type(extension)] = extension
+        if extension.singleton:
+            await self.runner.register_extension(extension)
 
     async def start(self):
         self.event_loop = asyncio.get_event_loop()
@@ -115,10 +129,6 @@ class RunnerContext:
             f" {self.worker_mode} workers"
         )
 
-        # First we tell the routes to bind to their extensions
-        await self._call_extensions_action(
-            'bind_to_extensions', extension_set=self.routes
-        )
         logger.debug(f"Extensions: {self.extensions}")
 
         # Once we have all extensions detected:
@@ -188,7 +198,7 @@ class RunnerContext:
         # create a task, the await will automatically giveup on the lock and
         # only return when the task in the worker is done.
         self.running_routes += 1
-        await worker.run(self.spawner)
+        await worker.run(self)
         self.running_routes -= 1
 
         # Update the metrics after the worker is finished.
@@ -264,6 +274,10 @@ class RunnerContext:
     def available_workers(self):
         return self.max_workers - self.running_routes
 
+    @property
+    def singletons(self):
+        return self.runner.singletons
+
 
 class Runner:
     def __init__(self, contexts, config, metric_server=None):
@@ -277,11 +291,24 @@ class Runner:
             contexts = [RunnerContext(contexts)]
         self.contexts = contexts
         self.metric_server = metric_server
+        self.extensions = set()
+        self.singletons = {}
 
     def exception_handler(self, loop, context):
         asyncio.run_coroutine_threadsafe(self._stop(), self.event_loop)
         if context.get("exception"):
             raise context.get("exception")
+
+    async def register_extension(self, extension):
+        if extension.singleton:
+            existing = self.singletons.get(type(extension))
+            if existing is not None and existing != extension:
+                raise TypeError(
+                    "Extension {} is a singleton and already has a registered "
+                    "Extension: {}".format(extension, existing)
+                )
+            self.singletons[type(extension)] = extension
+        self.extensions.add(extension)
 
     async def get_spawner(self, spawner_type, **spawner_configs):
         """
@@ -347,7 +374,7 @@ class Runner:
             raise
 
 
-async def find_extensions(cls, existing_extensions=None):
+async def find_extensions(cls: Extension, existing_extensions=None):
     """
     Searches for extensions inside a given class.
 
@@ -360,10 +387,9 @@ async def find_extensions(cls, existing_extensions=None):
         existing_extensions = set()
     extensions = existing_extensions
 
-    for name, extension in inspect.getmembers(
-            cls,
-            lambda x: isinstance(x, Extension) and x not in existing_extensions
-    ):
+    for extension in cls._extensions:
+        if extension in existing_extensions:
+            continue
         extensions.add(extension)
         extensions.update(await find_extensions(extension, extensions))
     return extensions

@@ -3,8 +3,11 @@ from typing import Any
 
 from kombu import Exchange, Queue
 
-from micro_framework.amqp.manager import ConsumerManager
+from micro_framework.amqp.amqp_elements import event_queue_name, \
+    event_exchange_name
+from micro_framework.amqp.manager import ConsumerManager, RPCManager
 from micro_framework.entrypoints import Entrypoint
+from micro_framework.rpc.manager import target_detail
 
 logger = getLogger(__name__)
 
@@ -15,14 +18,15 @@ class BaseEventListener(Entrypoint):
     It declares a Queue, binded to the exchange with exchange_name and with a
     routing_key from routing_key attribute.
     """
-    manager = ConsumerManager()
-
-    def __init__(self, exchange_name, routing_key, exchange_type='topic',
-                 payload_filter=None):
+    def __init__(self, exchange_name=None, routing_key=None,
+                 exchange_type='topic', payload_filter=None):
         self.exchange_name = exchange_name
         self.routing_key = routing_key
         self.exchange_type = exchange_type
         self.payload_filter = payload_filter
+
+    manager = ConsumerManager()
+    internal = False
 
     async def get_exchange(self):
         """
@@ -64,23 +68,17 @@ class BaseEventListener(Entrypoint):
         self.queue.declare()
         await self.manager.add_entrypoint(self)
 
-    async def on_finished_route(self, entry_id, worker):
-        # We ack the message independently of the result.
-        await self.manager.ack_message(entry_id)
-
-    async def on_failure(self, entry_id):
-        # Something not related to the business logic went wrong.
-        await self.manager.requeue_message(entry_id)
-
-    async def new_entry(self, message, payload: Any):
+    async def call_route(self, entry_id, *args, _meta=None, **kwargs):
         """
         Called by the Manager when a new message is received.
         :param Message message: Message object
         :param dict|str payload: Event Payload
         """
+        payload = args[0]
         if not self.payload_filter or self.payload_filter(payload):
-            return await self.call_route(message, payload)
-        await self.manager.ack_message(message)
+            return await super(BaseEventListener, self).call_route(
+                entry_id, *args, _meta=_meta, **kwargs
+            )
 
 
 class QueueListener(BaseEventListener):
@@ -98,17 +96,20 @@ class EventListener(QueueListener):
     def __init__(self, source_service, event_name, **kwargs):
         self.source_service = source_service
         self.event_name = event_name
-        exchange_name = f'{source_service}.events'  # Nameko Compatible!
+        exchange_name = event_exchange_name(source_service)
         super(EventListener, self).__init__(exchange_name, event_name, **kwargs)
 
     async def get_queue_name(self):
         service_name = self.runner.config['SERVICE_NAME']
-        target = self.route.target
-        if isinstance(target, str):
-            target_fn = target.split('.')[-1]
-        else:
-            target_fn = target.__name__
-        if self.route.method_name:
-            target_fn = f"{target_fn}.{self.route.method_name}"
-        # source_service.something_happened__my_service.target.function
-        return f'{self.source_service}.{self.event_name}__{service_name}.{target_fn}'
+        return event_queue_name(
+            self.event_name, self.source_service,
+            service_name, self.route.target
+        )
+
+
+class RPCListener(Entrypoint):
+    manager = RPCManager()
+
+    async def setup(self):
+        await super(RPCListener, self).setup()
+        await self.manager.add_entrypoint(self)

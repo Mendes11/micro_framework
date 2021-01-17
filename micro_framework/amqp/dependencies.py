@@ -1,23 +1,15 @@
-from kombu import Exchange, Connection
-from kombu.pools import producers
+import logging
+from typing import Dict
 
+from kombu import Exchange, producers
+
+from micro_framework.amqp.amqp_elements import get_connection
+from micro_framework.amqp.connectors import AMQPRPCConnector
+from micro_framework.amqp.rpc import RPCReplyListener
 from micro_framework.dependencies import Dependency
+from micro_framework.rpc import RPCDependency
 
-default_transport_options = {
-    'confirm_publish': True
-}
-
-def dispatch(amqp_uri, service_name, event, payload,
-             transport_options=None, headers=None, exchange_type='direct',
-             exchange=None):
-    if transport_options is None:
-        transport_options = default_transport_options
-    if not exchange:
-        exchange = Exchange(service_name, type=exchange_type)
-    connection = Connection(amqp_uri, transport_options=transport_options)
-    with producers[connection].acquire(block=True) as producer:
-        producer.publish(payload, exchange=exchange, routing_key=event,
-                         headers=headers)
+logger = logging.getLogger(__name__)
 
 
 class Producer(Dependency):
@@ -28,7 +20,7 @@ class Producer(Dependency):
     @property
     def exchange(self):
         service_name = self.service_name or self.config['SERVICE_NAME']
-        exchange_name = f"{service_name}.events" # Nameko Compatible
+        exchange_name = f"{service_name}.events"  # Nameko Compatible
         return Exchange(exchange_name, type='topic', auto_delete=True)
 
     @property
@@ -41,16 +33,51 @@ class Producer(Dependency):
             'confirm_publish': self.confirm_publish
         }
 
-    @property
-    def connection(self):
-        return Connection(self.amqp_uri,
-                          transport_options=self.transport_options)
-
-    def get_dependency(self, worker):
+    async def get_dependency(self, worker):
         exchange = self.exchange
+
         def publish(event_name, payload):
-            with producers[self.connection].acquire(block=True) as producer:
-                producer.maybe_declare(exchange)
-                return producer.publish(payload, exchange=exchange,
-                                        routing_key=event_name)
+            return dispatch(
+                self.amqp_uri, exchange, event_name, payload,
+            )
+
         return publish
+
+
+class RPCProxyProvider(RPCDependency):
+    """
+    Provides a RPCProxy with AMQPRPCConnector.
+    """
+
+    def __init__(self, target_service):
+        self.target_service = target_service
+        super(RPCProxyProvider, self).__init__()
+
+    reply_listener = RPCReplyListener()
+    connector_class = AMQPRPCConnector
+
+    def get_connector_kwargs(self) -> Dict:
+        return {
+            "amqp_uri": self.config.get("AMQP_URI"),
+            "target_service": self.target_service,
+            "reply_to_queue": self.reply_listener.queue,
+        }
+
+
+def dispatch(amqp_uri, exchange, routing_key, payload, **kwargs):
+    """
+    Helper to dispatch a single payload that will load the client and call
+    the send method.
+
+    :param str amqp_uri:
+    :param Exchange exchange:
+    :param str routing_key:
+    :param Any payload:
+    :param dict headers:
+    """
+    connection = get_connection(amqp_uri)
+    with producers[connection].acquire(block=True) as producer:
+        return producer.publish(
+            payload, exchange=exchange, routing_key=routing_key,
+            **kwargs
+        )

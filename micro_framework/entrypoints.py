@@ -16,11 +16,6 @@ class Entrypoint(Extension):
 
     async def bind(self, runner, parent=None):
         ext = await super(Entrypoint, self).bind(runner, parent=parent)
-        if ext != self and not isinstance(parent, Route):
-            raise TypeError(
-                f"An Entrypoint can only be used inside a Route. "
-                f"{type(parent)} was used"
-            )
         ext.route = parent
         return ext
 
@@ -31,59 +26,26 @@ class Entrypoint(Extension):
 
         It returns the Instantiated Worker.
 
+        This method caller should handle the following exceptions:
+
+        . PoolStopped: Raises when the worker is signalled to stop.
+        . Exception: Some internal error during the call to the worker.
+
         :param entry_id: Some object/identifier to be used to send a response
         for the correct caller.
+
         :param args: Additional arguments to be sent to the Route target
         function (such as payload for the event case)
+
         :param _meta: Metadata about this entrypoint, usually for internal
         use. (See AsyncRetry to an example)
+
         :param kwargs: Additional kwargs to be sent to the Route target
         function.
         """
-        try:
-            worker = await self.route.start_route(
-                entry_id, *args, _meta=_meta, **kwargs
-            )
-            await self.on_finished_route(entry_id, worker)
-        except PoolStopped:  # Unexpected error and we want to
-            logger.info("New entry called when pool was already "
-                        "signalled to stop.")
-            await self.on_failure(entry_id)
-        except Exception:
-            logger.exception("Failure when trying to start route for "
-                             f"entrypoint: {self}")
-
-    async def on_finished_route(self, entry_id, worker):
-        """
-        After a route is finished, this method is called with the finished
-        worker.
-
-        The worker will have a result and exception attributes, to check if
-        it was successful or not.
-
-        Also note that if some asynchronous backoff is used
-        (ie: the RabbitMQ retry plugin implemented in this Framework)
-
-        The worker might be returned as None since the route called the retry
-        method and then we should ignore the worker result.
-
-
-        :param entry_id: Some object/identifier to be used to send a response
-        for the correct caller.
-        :param Optional[Worker] worker: Worker Instance with result/exception
-        attrs or a None type, indicating an asynchronous backoff was made.
-        """
-        pass
-
-    async def on_failure(self, entry_id):
-        """
-        When a Route fails to spawn a worker to some reason, it will call
-        this method to handle what to do about it.
-
-        :param entry_id: Some object/identifier to be used to send a response
-        for the correct caller.
-        """
-        pass
+        return await self.route.start_route(
+            entry_id, *args, _meta=_meta, **kwargs
+        )
 
 
 class TimeEntrypoint(Entrypoint):
