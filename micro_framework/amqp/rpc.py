@@ -213,13 +213,12 @@ class Publisher(RPCConnection):
                     raise RPCTargetDoesNotExist()
                 raise
 
-            if mandatory:
-                if not use_confirms:
-                    warnings.warn(
-                        "Mandatory delivery was requested, but "
-                        "unroutable messages cannot be detected without "
-                        "publish confirms enabled."
-                    )
+            if mandatory and not use_confirms:
+                warnings.warn(
+                    "Mandatory delivery was requested, but "
+                    "unroutable messages cannot be detected without "
+                    "publish confirms enabled."
+                )
 
     def send(self, payload, *args, **kwargs):
         payload = json.loads(payload)
@@ -241,13 +240,9 @@ class Publisher(RPCConnection):
     def send_and_receive(self, *args, **kwargs):
         corr_id = str(uuid.uuid4())
         timeout = kwargs.pop("timeout", None)
-        print("Starting to send message with corr_id = {}".format(corr_id))
-        # TODO There is a problem here with the Queue. Maybe because of the
-        #  singleton stuff. Check it.
 
         # Notify our reply listener of a new correlation_id that will have
         # ListenerReceiver.
-        # receiver = self.send_to_listener(corr_id)
         from micro_framework.amqp.dependencies import listen_to_correlation
         receiver = listen_to_correlation(corr_id)
         self.send(
@@ -257,7 +252,5 @@ class Publisher(RPCConnection):
 
             **kwargs
         )
-        print("Message Sent. Waiting for result.")
         result = receiver.result(timeout=timeout)
-        print("Received Result: {}".format(result))
         return result

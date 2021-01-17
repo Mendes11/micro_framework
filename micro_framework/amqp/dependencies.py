@@ -1,9 +1,6 @@
+import logging
 import multiprocessing
-import uuid
-
-from functools import partial
-from typing import Callable, Dict
-from uuid import UUID
+from typing import Dict
 
 from kombu import Exchange, producers
 
@@ -15,32 +12,7 @@ from micro_framework.amqp.entrypoints import BaseEventListener
 from micro_framework.dependencies import Dependency
 from micro_framework.rpc import RPCDependency
 
-
-def send_to_listener(
-        correlation_id: UUID, queue: multiprocessing.Queue,
-        lock: multiprocessing.RLock
-) -> ListenerReceiver:
-    """
-    Sends through a Queue the correlation_id and a connection which
-    the Listener will send the message that matches the correlation_id.
-
-    The use of the Queue is necessary because we might use
-    multiprocess as a worker spawner and the listener will be running in
-     the main process but the RPCTarget caller won't.
-
-    :param UUID correlation_id: A UUID V4 representing a RPC Message
-    through the AMQP Broker.
-    """
-
-    receiver, sender = multiprocessing.Pipe(duplex=False)
-    with lock:
-        queue.put(
-            (sender, correlation_id)
-        )
-    print("send_to_listener: Inserting the received correlation_id: {} with "
-          "sender: {} to the queue: {}".format(correlation_id, sender, queue))
-    listener_receiver = ListenerReceiver(receiver)
-    return listener_receiver
+logger = logging.getLogger(__name__)
 
 
 class Producer(Dependency):
@@ -74,6 +46,7 @@ class Producer(Dependency):
 
         return publish
 
+
 m = multiprocessing.Manager()
 _correlations_queue = m.Queue()
 lock = m.Lock()
@@ -98,21 +71,6 @@ class RPCReplyListener(BaseEventListener):
     singleton = True
     internal = True
 
-    def __init__(self, *args, **kwargs):
-        super(RPCReplyListener, self).__init__(*args, **kwargs)
-        # This will be shared between this listener and the
-        # DependencyProviders that implement it, so that they can send
-        # through the Queue the Correlation and Connection they should listen
-        # to and then send through.
-        # self.m = multiprocessing.Manager()
-        # self._correlations_queue = self.m.Queue()
-        # self.lock = self.m.Lock()
-        #
-        # # Map the correlation IDs to send to their respective Connections (
-        # # Through a multiprocessing PIPE)
-        # self._correlation_ids = self.m.dict()
-
-
     async def setup(self):
         self._reply_queue = rpc_reply_queue()
         self.routing_key = self._reply_queue.routing_key
@@ -124,23 +82,12 @@ class RPCReplyListener(BaseEventListener):
     async def get_queue(self):
         return self._reply_queue
 
-    # def listen_to_correlation(self, correlation_id):
-    #     receiver, sender = multiprocessing.Pipe(duplex=False)
-    #     self._correlation_ids[correlation_id] = sender
-    #     return ListenerReceiver(receiver)
-
     async def read_correlations_queue(self):
         global _correlation_ids
-        print("Reading from correlations_queue: {}".format(_correlations_queue))
-        try:
-            while not _correlations_queue.empty():
-                sender, corr_id = _correlations_queue.get_nowait()
-                with lock:
-                    _correlation_ids[corr_id] = sender
-        except Exception as exc:
-            # TODO Remove Prints
-            import traceback; traceback.print_exc()
-            print("Error reading correlations_queue")
+        while not _correlations_queue.empty():
+            sender, corr_id = _correlations_queue.get_nowait()
+            with lock:
+                _correlation_ids[corr_id] = sender
 
     async def call_route(self, entry_id, *args, _meta=None, **kwargs):
         global _correlation_ids
@@ -151,8 +98,7 @@ class RPCReplyListener(BaseEventListener):
         try:
             corr_id = entry_id.properties["correlation_id"]
         except KeyError:
-            # TODO Remove Print
-            print("Received a Message without correlation_id")
+            logger.error("Received a reply with no registered correlation_id")
             return
 
         body = args[0]
@@ -163,18 +109,20 @@ class RPCReplyListener(BaseEventListener):
                 if not sender.closed and sender.writable:
                     sender.send(body)
                 else:
-                    print("Sender is closed or not writable.{}, {}".format(
-                        sender.closed, sender.writable))
+                    logger.error(
+                        "Sender is closed or not writable.{}, {}".format(
+                            sender.closed, sender.writable)
+                    )
             else:
-                print("Correlation id: {} not found on _correlation_ids "
-                      "dict.".format(corr_id))
+                logger.error(
+                    "Correlation id: {} not found on "
+                    "_correlation_ids dict.".format(corr_id)
+                )
         except Exception:
-            print("Exception at correlation checking.")
-            import traceback; traceback.print_exc()
-
-    # @property
-    # def correlations_queue(self):
-    #     return self._correlations_queue
+            logger.exception(
+                "Error with ReplyListener when returning an answer from a "
+                "RPC call."
+            )
 
 
 class RPCProxyProvider(RPCDependency):
@@ -190,17 +138,10 @@ class RPCProxyProvider(RPCDependency):
     connector_class = AMQPRPCConnector
 
     def get_connector_kwargs(self) -> Dict:
-        print("Instantiating Provider with correlations_queue = {}".format(
-            _correlations_queue))
-
         return {
             "amqp_uri": self.config.get("AMQP_URI"),
             "target_service": self.target_service,
             "reply_to_queue": self.reply_listener.queue,
-            # "send_to_listener": partial(
-            #     send_to_listener, queue=self.reply_listener.correlations_queue,
-            #     lock=self.reply_listener.lock
-            # )
         }
 
 

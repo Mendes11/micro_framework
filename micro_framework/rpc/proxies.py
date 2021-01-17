@@ -47,12 +47,11 @@ class RPCTarget:
         message = format_rpc_command(self.target, *args, **kwargs)
         future = Future()
 
-        # FIXME This is smelly... how is it usually done? Maybe use the runner
-        # spawners to do it, but then issue #12 should be done first.
-        # TODO Change to executor to use the submit method and it will
-        #  automatically handle the Future class.
+        # TODO Create an executor instance in the worker context (specially
+        #  for the instantiated worker).
         t = threading.Thread(
-            target=self._call_client_task, args=(message, self.connector, future)
+            target=self._call_client_task,
+            args=(message, self.connector, future)
         )
         t.daemon = True
         t.start()
@@ -92,7 +91,7 @@ class RPCProxy:
     target_class = RPCTarget
 
     def __init__(self, connector: RPCConnector, targets: List[Dict],
-                 name: str=None):
+                 name: str = None):
         self._targets = set()
         self.connector = connector
         self.name = name
@@ -115,7 +114,7 @@ class RPCProxy:
     def new_nested_proxy(self, name: str) -> 'RPCProxy':
         return self.__class__(self.connector, [], name=name)
 
-    def add_target(self, target: dict, nested_name: str=None) -> RPCTarget:
+    def add_target(self, target: dict, nested_name: str = None) -> RPCTarget:
         target_name = nested_name or target['target']
         target_name, *nested = target_name.split('.')
         if nested:

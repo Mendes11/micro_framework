@@ -115,7 +115,7 @@ class ConsumerManager(Extension, ConsumerMixin):
 
     async def ack_message(self, message):
         # TODO using async we won't need this lock anymore. After all
-        #  convertion is completed, remove this a test it.
+        #  convertion is completed, remove this and test it.
         with self.message_lock:  # One message at a time to prevent errors.
             message.ack()
 

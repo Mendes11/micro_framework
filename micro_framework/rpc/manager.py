@@ -5,7 +5,6 @@ from micro_framework.exceptions import RPCTargetDoesNotExist
 from micro_framework.extensions import Extension
 from .formatters import format_rpc_response
 from ..entrypoints import Entrypoint
-from ..targets import TargetClassMethod
 
 
 async def target_detail(entrypoint: Entrypoint):
@@ -43,6 +42,7 @@ async def target_detail(entrypoint: Entrypoint):
         'kwargs': kwargs,
         'docstring': inspect.getdoc(target)
     }
+
 
 class RPCRegister:
     def __init__(self):
@@ -95,13 +95,14 @@ class RPCManagerMixin(Extension):
         - kwargs: Kwargs for the specific target.
 
     """
+
     def __init__(self):
         super(RPCManagerMixin, self).__init__()
         self.entrypoints = {}
 
     context_singleton = True
     internal_commands = {"__list_targets__", "__get_target__"}
-    register = RPCRegister() # This is unique amongst all RPCManagers.
+    register = RPCRegister()  # This is unique amongst all RPCManagers.
 
     async def add_entrypoint(self, entrypoint):
         await self.register.add_entrypoint(entrypoint)
@@ -119,7 +120,7 @@ class RPCManagerMixin(Extension):
             method = getattr(self, command)
             response, exception = await method(client, *args, **kwargs)
         except AttributeError:
-             response, exception = await self.__call_target__(
+            response, exception = await self.__call_target__(
                 client, command, *args, **kwargs
             )
         return response, exception
@@ -162,9 +163,9 @@ class RPCManagerMixin(Extension):
         :return list, Optional[Exception]: All available Entrypoints's target
         """
         return [
-            await target_detail(entrypoint)
-            for entrypoint in self.register.entrypoints
-        ], None
+                   await target_detail(entrypoint)
+                   for entrypoint in self.register.entrypoints
+               ], None
 
     async def __get_target__(self, client, target):
         """

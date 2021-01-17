@@ -1,10 +1,9 @@
 import json
-from functools import partial
 
 from micro_framework.dependencies import Dependency
 from micro_framework.rpc.connectors import RPCConnector
-from .proxies import RPCProxy
 from .formatters import format_rpc_command
+from .proxies import RPCProxy
 
 
 class RPCDependencyMixin:
@@ -15,6 +14,7 @@ class RPCDependencyMixin:
 
 
     """
+
     def parse_response(self, response):
         """
         Parses the response from the RPC Manager.
@@ -69,7 +69,6 @@ class RPCDependencyMixin:
 class RPCDependency(RPCDependencyMixin, Dependency):
     """
     Dependency Provider that injects a RPCProxy into the worker's target.
-
     """
     proxy_class: RPCProxy = RPCProxy
     connector_class: RPCConnector = None
@@ -96,12 +95,6 @@ class RPCDependency(RPCDependencyMixin, Dependency):
 
     def get_proxy(self):
         return self.get_proxy_class()(**self.get_proxy_kws())
-
-    # async def setup_dependency(self, worker):
-    #     await super(RPCDependencyMixin, self).setup_dependency(worker)
-    #     self.targets = await self.runner.event_loop.run_in_executor(
-    #         None, self.list_targets
-    #     ) or []
 
     async def get_dependency(self, worker):
         # Run in executor because the RPCProxy is not an async class and
