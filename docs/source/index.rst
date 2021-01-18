@@ -19,20 +19,6 @@ Instalation
    pip install micro_framework
 
 
-Components
-===========================================
-
-   - Runner: It is the component that will start your service. You instantiate it with the configuration and the routes.
-
-   - Entrypoint: An entrypoint is the trigger of an external action to the execution of the route configured to it.
-
-   - Route: A route acts as a pipeline for the entrypoint payload until reaching the target function to be executed. Inside the route you define the behavior of the framework before creating a worker and after the worker finished the execution. It has a default Worker class but accepts a custom one. Inside the route you can add dependencies, message translators that will be used by the worker when spawned and the entrypoint to trigger it.
-
-   - Worker: A worker is the class responsible for the function call and the steps before and after such as message translating using the route translators and dependency injection from the given dependencies.
-
-   - Dependency: It's a class that should be passed to the target function with access to the worker context.
-
-   - MessageTranslator: Transforms a payload/message into another payload/message.
 
 Usage
 =========================================
@@ -101,21 +87,143 @@ tasks.py
    def test_failure(payload, producer, retry):
        print("Called after test failed and the max_retries is reached.")
 
+
+Components
+===========================================
+
+Runner
+-------------------------------------------
+
+   It is the component that will start your service. You instantiate it with
+   the configuration and the contexts.
+
+Runner Context
+-------------------------------------------
+
+Aggregate Routes that share the same workers.
+
+   * In the same Runner (your service), you can have multiple
+  contexts that do not share the workers number. That way you can have
+  dedicated workers to do some long-running tasks without letting your other
+  tasks starve due to no workers available.
+  * Each Context will have it's own metric label to differentiate it.
+
+
+Route
+-------------------------------------------
+
+A route acts as a pipeline for the entrypoint payload until reaching the
+**Target** function to be executed.
+
+Inside the route you define the behavior of the framework before creating a
+worker and after the worker finished the execution. It has a default Worker
+class but accepts a custom one.
+
+Inside the route you can add message translators that will be used by the
+worker when spawned and the entrypoint to trigger it.
+
+Entrypoint
+-------------------------------------------
+
+An entrypoint is the trigger of an external action to the execution of the
+route configured to it.
+
+Allowed Entrypoints are:
+
+   - TimeEntrypoint:
+      -- Its a timer, that triggers at each specified time. (Not cluster aware)
+
+   - amqp.EventListener:
+      -- It's an AMQP queue listener, that deals automatically configures all
+      AMQP stuff and can be called either by this Framework **Producer**
+      Dependency or by Nameko's EventDispatcher (yes, you can use both!).
+
+      -- .. note::
+         The same applies to our Producer allowing to trigger Nameko's
+         event_source
+
+   - websocket.WebSocketListener:
+      -- Start's a Websocket Server that implements our RPC Manager Class.
+         You can call it through our WebSocketClient dependency.
+
+
+   - amqp.RPCListener:
+      -- Allows the **Target** to be called through AMQP protocol.
+
+
+Worker
+-------------------------------------------
+
+A worker is the class responsible for the function call and the
+ steps before and after such as message translating using the route
+  translators and dependency injection from the given dependencies.
+
+
+Dependency
+-------------------------------------------
+
+It is a class that is Provides usually a callable to be injected into the
+**Target**.
+
+To Inject a dependency, you can either declare it in a class that has the
+**Target** as a method, or use the @inject decorator in the method/function
+directly, so it will be passed as a argument (named as the attribute name in
+the @inject)
+
+
+MessageTranslator
+-------------------------------------------
+
+Transforms a payload/message into another payload/message.
+
+
+
 Configurations
 ==============================================
-   * AMQP_URI: URI of the broker.
 
-   * MAX_WORKERS: Number of workers to spawn simultaneously.
+   - AMQP_URI: URI of the broker (When using AMQP Stuff).
 
-   * SERVICE_NAME: The name of the running service, useful for Producer dependency which automatically includes the service_name in the dispatch.
 
-   * WORKER_MODE: Runner mode
+   - MAX_WORKERS: Number of workers to spawn simultaneously
 
-      * thread: Each worker will run in the same process as Threads. When stopped, the worker will finish only the current running task and ignore the pending ones in the pool
-      * greedy_thread: Same as thread but the worker will only finish after completing all pending tasks in the pool
-      * process: Each worker will run in a different process.
-      * greedy_process: Same as process and the same behavior when shutting down as greedy_thread.
 
+   - SERVICE_NAME: The name of the running service, useful for Producer
+    dependency which automatically includes the service_name in the dispatch.
+
+
+   - WORKER_MODE: Runner mode. It can be:
+       - thread: Each worker will run in the same process as Threads.
+        When stopped, the worker will finish only the current
+        running task and ignore the pending ones in the pool
+
+       - greedy_thread: Same as thread but the worker will only finish after
+         completing all pending tasks in the pool
+
+       - process: Each worker will run in a different process.
+
+       - greedy_process: Same as process and the same behavior when shutting
+        down as greedy_thread.
+
+
+   - MAX_TASKS_PER_CHILD: (process mode only) Kill the process after handling N
+     tasks and then start a new one.
+
+
+   - WEBSOCKET_IP (default="0.0.0.0"): Address that the WS server will listen
+to.
+
+
+   - WEBSOCKET_PORT (default=8765): PORT that the WS server will listen to.
+
+
+   - ENABLE_METRICS (default=False): Allows the framework to export prometheus
+     metrics in a configured host/port
+
+
+   - METRICS dict: Configurations to the Metric Server
+
+     - HOST (default="0.0.0.0")
+     - PORT (default=8000)
 
 Notes
 ==============================================
