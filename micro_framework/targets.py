@@ -26,12 +26,6 @@ class Target():
 
     def populate_dependencies(self):
         self._dependencies = getattr(self.target, "__dependencies__", {})
-        self._target = getattr(self.target, "__original_function", self.target)
-        # fn_parameters = inspect.signature(self.target).parameters
-        # for name, parameter in fn_parameters.items():
-        #     annotation = parameter.annotation
-        #     if isinstance(annotation, Dependency):
-        #         self._dependencies[name] = annotation
 
     async def call_dependencies(
             self, dependencies: Dict, action: str, *args, **kwargs) -> Dict:
