@@ -211,12 +211,12 @@ class TargetClassMethod(Extension, Target):
 
     def __str__(self):
         return "{}.{}".format(
-            self.target_class.__name__.lower(), self.target_method
+            self.target_class.__name__, self.target_method
         )
 
     def __repr__(self):
         return "<TargetClassMethod {}.{}>".format(
-            self.target_class.__name__.lower(), self.target_method
+            self.target_class.__name__, self.target_method
         )
 
 

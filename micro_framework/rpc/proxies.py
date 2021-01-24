@@ -97,7 +97,7 @@ class RPCProxy:
         self.name = name
 
         for target in targets:
-            self._targets.add(self.add_target(target))
+            self.add_target(target)
 
     def get_target_class(self) -> Type[RPCTarget]:
         return self.target_class
@@ -116,13 +116,14 @@ class RPCProxy:
 
     def add_target(self, target: dict, nested_name: str = None) -> RPCTarget:
         target_name = nested_name or target['target']
-        target_name, *nested = target_name.split('.')
+        target_name, *nested = target_name.split('.', 1)
         if nested:
             obj = getattr(self, target_name, self.new_nested_proxy(target_name))
-            obj.add_target(target, '.'.join(nested))
+            obj.add_target(target, nested[0])
         else:
             obj = self.get_target(**target)
         setattr(self, target_name, obj)
+        self._targets.add(obj)
         return obj
 
     @property
