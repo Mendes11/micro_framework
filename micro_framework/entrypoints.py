@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 class Entrypoint(Extension):
     route = None
 
-    async def bind(self, runner, parent=None):
-        ext = await super(Entrypoint, self).bind(runner, parent=parent)
+    def bind(self, runner, parent=None):
+        ext = super(Entrypoint, self).bind(runner, parent=parent)
         ext.route = parent
         return ext
 

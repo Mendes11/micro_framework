@@ -127,10 +127,10 @@ class Target():
 
 
 class TargetFunction(Target, Extension):
-    async def bind(self, runner, parent=None):
-        ext = await super(TargetFunction, self).bind(runner, parent=parent)
+    def bind(self, runner, parent=None):
+        ext = super(TargetFunction, self).bind(runner, parent=parent)
         for name, dependency in ext._dependencies.items():
-            extension = await ext.bind_new_extension(
+            extension = ext.bind_new_extension(
                 name, dependency, runner, ext
             )
             ext._dependencies[name] = extension
@@ -162,17 +162,17 @@ class TargetClassMethod(Extension, Target):
         for name, dependency in dependencies:
             self._class_dependencies[name] = dependency
 
-    async def bind(self, runner, parent=None):
-        ext = await super(TargetClassMethod, self).bind(runner, parent=parent)
+    def bind(self, runner, parent=None):
+        ext = super(TargetClassMethod, self).bind(runner, parent=parent)
 
         for name, dependency in ext._dependencies.items():
-            extension = await ext.bind_new_extension(
+            extension = ext.bind_new_extension(
                 name, dependency, runner, ext
             )
             ext._class_dependencies[name] = extension
 
         for name, dependency in ext._class_dependencies.items():
-            extension = await ext.bind_new_extension(
+            extension = ext.bind_new_extension(
                 name, dependency, runner, ext
             )
             ext._class_dependencies[name] = extension

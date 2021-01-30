@@ -2,9 +2,9 @@ import logging
 from wsgiref.simple_server import make_server
 
 from prometheus_client import make_wsgi_app, REGISTRY, Gauge, Counter, Summary, \
-    Info, make_asgi_app
+    Info
 from prometheus_client.exposition import ThreadingWSGIServer, _SilentHandler
-import uvicorn
+
 from micro_framework.extensions import Extension
 
 logger = logging.getLogger(__name__)

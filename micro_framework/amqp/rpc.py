@@ -1,5 +1,7 @@
 import logging
-import multiprocessing
+from multiprocessing import Manager
+from multiprocessing import Pipe
+
 
 from micro_framework.amqp.amqp_elements import rpc_reply_queue, rpc_exchange
 from micro_framework.amqp.entrypoints import BaseEventListener
@@ -33,7 +35,7 @@ class ListenerReceiver:
         return self.connection.recv()
 
 
-m = multiprocessing.Manager()
+m = Manager()
 _correlations_queue = m.Queue()
 lock = m.Lock()
 _correlation_ids = m.dict()
@@ -41,7 +43,7 @@ _correlation_ids = m.dict()
 
 def listen_to_correlation(correlation_id):
     global _correlation_ids
-    receiver, sender = multiprocessing.Pipe(duplex=False)
+    receiver, sender = Pipe(duplex=False)
     with lock:
         _correlation_ids[correlation_id] = sender
     return ListenerReceiver(receiver)

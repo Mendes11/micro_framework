@@ -44,10 +44,10 @@ class Dependency(Extension):
         worker and the result + exception from that call.
     """
 
-    async def bind(self, runner, parent=None):
-        ext = await super(Dependency, self).bind(runner, parent=None)
+    def bind(self, runner, parent=None):
+        ext = super(Dependency, self).bind(runner, parent=None)
         ext.config = runner.config
-        ext.worker = parent
+        ext.target = parent
         return ext
 
     async def setup_dependency(self, worker: Worker):
@@ -92,3 +92,20 @@ def inject(**dependencies):
         wrapped.__dependencies__ = dependencies
         return wrapped
     return decorator
+
+
+# TODO WorkerDependency, that works as the old dependencies and the methods
+#  are called inside the worker context. Therefore it doesn't allow us to use
+#  the runner. (Unbinded to the runner)
+
+
+# TODO Also, since we cannot run the Target inside the worker, we should
+#  mount the target with the pipeline to start the inner dependencies!
+
+class WorkerDependency(Dependency):
+
+    def bind(self, runner, parent=None):
+        ext = super(Dependency, self).bind(runner, parent=None)
+        ext.config = runner.config
+        ext.target = parent
+        return ext

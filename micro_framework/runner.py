@@ -100,10 +100,10 @@ class RunnerContext:
             if not isinstance(route, Route):
                 raise TypeError("Only Route class should be added as a "
                                 "route.")
-            binded_routes.append(await route.bind(self))
+            binded_routes.append(route.bind(self))
         self.routes = binded_routes
 
-    async def register_extension(self, extension):
+    def register_extension(self, extension):
         if isinstance(extension, Entrypoint) and not extension.singleton:
             self.entrypoints.add(extension)
         else:
@@ -120,7 +120,7 @@ class RunnerContext:
                 )
             self.context_singletons[type(extension)] = extension
         if extension.singleton:
-            await self.runner.register_extension(extension)
+           self.runner.register_extension(extension)
 
     async def start(self):
         self.event_loop = asyncio.get_event_loop()
@@ -299,7 +299,7 @@ class Runner:
         if context.get("exception"):
             raise context.get("exception")
 
-    async def register_extension(self, extension):
+    def register_extension(self, extension):
         if extension.singleton:
             existing = self.singletons.get(type(extension))
             if existing is not None and existing != extension:
@@ -327,7 +327,7 @@ class Runner:
 
         if self.metric_server is None:
             self.metric_server = PrometheusMetricServer()
-        self.metric_server = await self.metric_server.bind(self)
+        self.metric_server = self.metric_server.bind(self)
 
         for context in self.contexts:
             await context.bind(self)
