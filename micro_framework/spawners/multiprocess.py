@@ -4,11 +4,12 @@ import signal
 import threading
 from concurrent.futures import _base, ProcessPoolExecutor
 from concurrent.futures.process import _ExceptionWithTraceback
-from multiprocessing.context import Process
-from multiprocessing.queues import Queue
 from queue import Empty
 
 import os
+# from multiprocessing.context import Process
+# from multiprocessing.queues import Queue
+from multiprocess import Process, Manager
 
 from micro_framework.exceptions import PoolStopped
 from micro_framework.spawners.base import Spawner, Task, CallItem
@@ -60,9 +61,10 @@ class ProcessSpawner(Spawner, _base.Executor):
         self.max_tasks_per_child = max_tasks_per_child
         self._pool = []
         self.ctx = multiprocessing.get_context()
-        self.write_queue = Queue(ctx=self.ctx)
-        self.read_queue = Queue(ctx=self.ctx)
-        self.call_queue = Queue(ctx=self.ctx)
+        self.manager = Manager()
+        self.write_queue = self.manager.Queue()
+        self.read_queue = self.manager.Queue()
+        self.call_queue = self.manager.Queue()
         self.shutdown_pool = False
         self.shutdown_signal = False
         self.shutdown_lock = threading.Lock()

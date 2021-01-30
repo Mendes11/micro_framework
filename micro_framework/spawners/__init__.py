@@ -1,7 +1,6 @@
 from .multiprocess import ProcessSpawner, ProcessPoolSpawner
 from .thread import ThreadSpawner, ThreadPoolSpawner
 
-
 # Greedy Spawner means that the runner will consume all received tasks so far
 # when a stop signal is sent.
 
