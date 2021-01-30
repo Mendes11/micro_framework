@@ -6,7 +6,7 @@ from kombu import Queue
 from micro_framework.amqp.amqp_elements import rpc_exchange, \
     rpc_routing_key, rpc_broadcast_routing_key, Publisher
 from micro_framework.amqp.manager import RPCManager
-from micro_framework.amqp.rpc import listen_to_correlation
+from micro_framework.amqp.rpc import listen_to_correlation, lock
 from micro_framework.rpc import RPCConnector, RPCConnection
 
 
@@ -41,10 +41,16 @@ class RPCProducer(Publisher, RPCConnection):
             routing_key = rpc_routing_key(
                 self.target_service, target_id=target_id
             )
-        self.publish(
-            payload, routing_key=routing_key, exchange=exchange,
-            **kwargs
-        )
+        with lock:
+            # The publisher was raising some errors regarding wrong message
+            # codes. Probably due to some concurrent call.
+            # TODO This shouldn't have happened since we instantiate a new
+            #  connection each time and use the get_producers internally....
+            #  That uses the producers pool with acquire(block=True)
+            self.publish(
+                payload, routing_key=routing_key, exchange=exchange,
+                **kwargs
+            )
 
     def send_and_receive(self, *args, **kwargs):
         corr_id = str(uuid.uuid4())
