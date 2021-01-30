@@ -16,6 +16,10 @@ class Extension:
     parent = None
     _extensions = set()
 
+    # Define this to True so we won't store the runner nor the parent. Also
+    # we won't allow any internal extension to be non-picklable when this is
+    # True.
+    picklable = False
 
     def __new__(cls, *args, **kwargs):
         # Hack from Nameko's Extension to enable us to instantiate a new
@@ -30,8 +34,8 @@ class Extension:
 
         return inst
 
-    async def bind_new_extension(self, attr_name, extension, runner, parent):
-        binded_ext = await extension.bind(runner, parent=parent)
+    def bind_new_extension(self, attr_name, extension, runner, parent):
+        binded_ext = extension.bind(runner, parent=parent)
         parent._extensions.add(binded_ext)
         try:
             setattr(parent, attr_name, binded_ext)
@@ -39,7 +43,34 @@ class Extension:
             pass
         return binded_ext
 
-    async def bind(self, runner, parent=None):
+    def bind_inner_extensions(self):
+        """
+        Binds to the extensions declared inside this class.
+
+        # Note for Future me: This is already called in the binded extension.
+        No need to use a ext variable here.
+        """
+        # Retrieve the extensions declared inside this extension
+        inner_extensions = inspect.getmembers(
+            self, lambda x: isinstance(x, Extension) and x._runner is None
+        )
+        for attr_name, extension in inner_extensions:
+            extension = getattr(self, attr_name)
+            if attr_name == "parent" or attr_name == "runner":
+                continue
+            if self.picklable and not extension.picklable:
+                raise TypeError(
+                    "{} is a picklable extension while it's internal extension "
+                    "{} is not.".format(type(self), type(extension))
+                )
+            if (not self.picklable and extension._runner == self.runner):
+                # Cyclic referencing
+                continue
+
+            # Bind this extension to this binded extension.
+            self.bind_new_extension(attr_name, extension, self.runner, self)
+
+    def bind(self, runner, parent=None):
         """
         Binds the extension to the service runner and parent.
         :param Runner runner: Service Runner
@@ -50,37 +81,16 @@ class Extension:
         if self.singleton and type(self) in runner.singletons:
             return runner.singletons[type(self)]
 
-        if self._runner == runner:
+        if not self.picklable and self._runner == runner:
             return self
 
-        ext = self
-        if (not self.context_singleton or self._runner != runner) and not self.singleton:
-            # The context singletons are a singleton only in the same runner
-            # context.
-            # We copy this extension to prevent some threading problems
-            ext = self._clone()
+        ext = self._clone()
+        if not self.picklable:
             ext.parent = parent
-        else:
-            ext.parent = runner
+            ext._runner = runner
 
-        ext._runner = runner
-
-        # Retrieve the extensions declared inside this extension
-        inner_extensions = inspect.getmembers(
-            ext, lambda x: isinstance(x, Extension) and x._runner is None
-        )
-        for attr_name, extension in inner_extensions:
-            extension = getattr(ext, attr_name)
-            if attr_name == "parent" or attr_name == "runner":
-                continue
-
-            if extension._runner == runner:
-               # Cyclic referencing
-               continue
-
-            # Bind this extension to this binded extension.
-            await ext.bind_new_extension(attr_name, extension, runner, ext)
-        await runner.register_extension(ext)
+        ext.bind_inner_extensions()
+        runner.register_extension(ext)
         return ext
 
     async def setup(self):
@@ -107,7 +117,7 @@ class Extension:
 
     @property
     def runner(self):
-        if self._runner is None:
+        if self._runner is None and not self.picklable:
             raise RuntimeError("This extension is not binded. You must bind "
                                "it to a runner before trying to attempt this.")
         return self._runner
