@@ -1,4 +1,5 @@
 import logging
+from functools import partial
 from typing import Dict
 
 from kombu import Exchange, producers
@@ -35,13 +36,7 @@ class Producer(Dependency):
 
     async def get_dependency(self, worker):
         exchange = self.exchange
-
-        def publish(event_name, payload):
-            return dispatch(
-                self.amqp_uri, exchange, event_name, payload,
-            )
-
-        return publish
+        return partial(dispatch, self.amqp_uri, exchange)
 
 
 class RPCProxyProvider(RPCDependency):
