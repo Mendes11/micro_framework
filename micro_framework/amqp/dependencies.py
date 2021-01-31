@@ -7,13 +7,13 @@ from kombu import Exchange, producers
 from micro_framework.amqp.amqp_elements import get_connection
 from micro_framework.amqp.connectors import AMQPRPCConnector
 from micro_framework.amqp.rpc import RPCReplyListener
-from micro_framework.dependencies import Dependency
+from micro_framework.dependencies import Dependency, WorkerDependency
 from micro_framework.rpc import RPCDependency
 
 logger = logging.getLogger(__name__)
 
 
-class Producer(Dependency):
+class Producer(WorkerDependency):
     def __init__(self, confirm_publish=True, service_name=None):
         self.service_name = service_name
         self.confirm_publish = confirm_publish
@@ -33,10 +33,15 @@ class Producer(Dependency):
         return {
             'confirm_publish': self.confirm_publish
         }
-
-    async def get_dependency(self, worker):
+    
+    def bind(self, runner, parent=None):
+        return super(Producer, self).bind(runner, parent)
+    
+    def get_dependency(self, worker):
         exchange = self.exchange
-        return partial(dispatch, self.amqp_uri, exchange)
+        def dispatch_event(event_name, payload):
+            return dispatch(self.amqp_uri, exchange, event_name, payload)
+        return dispatch_event
 
 
 class RPCProxyProvider(RPCDependency):

@@ -33,12 +33,12 @@ class Worker:
         self.finished = False
         self._meta = _meta or {}  # Content shared by extensions
 
-    async def call_task(self, executor, fn, *fn_args, **fn_kwargs):
+    async def call_task(self, executor, mounted_target, *fn_args, **fn_kwargs):
         try:
-            if inspect.iscoroutinefunction(fn):
-                self.result = await fn(*fn_args, **fn_kwargs)
+            if inspect.iscoroutinefunction(mounted_target.run):
+                self.result = await mounted_target.run(*fn_args, **fn_kwargs)
             else:
-                func = partial(fn, *fn_args, **fn_kwargs)
+                func = partial(mounted_target.run, *fn_args, **fn_kwargs)
                 event_loop = asyncio.get_event_loop()
                 self.result = await event_loop.run_in_executor(executor, func)
         except Exception as exc:

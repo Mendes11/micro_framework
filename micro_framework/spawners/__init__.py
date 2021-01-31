@@ -14,3 +14,8 @@ SPAWNERS = {
     # Will consume all received tasks on stop
     'greedy_process': ProcessPoolSpawner,  # Will consume all received tasks
 }
+
+
+THREAD_SPAWNERS = ["thread", "greedy_thread"]
+
+PROCESS_SPAWNERS = ["process", "greedy_process"]

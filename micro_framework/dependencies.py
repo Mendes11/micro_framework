@@ -102,10 +102,38 @@ def inject(**dependencies):
 # TODO Also, since we cannot run the Target inside the worker, we should
 #  mount the target with the pipeline to start the inner dependencies!
 
+
 class WorkerDependency(Dependency):
+    """
+    A type of Dependency that is loaded only when inside the executor.
+
+    This Dependency is helpful when the code to be injected isn't picklable.
+    (Due to multiprocessing Nature)
+
+    Currently, the implementation should be done in synchronous code only.
+
+    """
+    picklable = True
 
     def bind(self, runner, parent=None):
-        ext = super(Dependency, self).bind(runner, parent=None)
+        ext = super(Dependency, self).bind(runner, parent=parent)
         ext.config = runner.config
-        ext.target = parent
         return ext
+
+    def setup_dependency(self, worker: Worker):
+        """
+        Do any setup necessary before the dependency injection.
+        """
+        pass
+
+    def get_dependency(self, worker: Worker) -> Callable:
+        """
+        Injects the dependency that will be passed to the Target Function.
+        """
+        pass
+
+    def after_call(self, worker: Worker, result: Any, exc: Exception):
+        """
+        Cleanup after the function has finished or raised.
+        """
+        pass
