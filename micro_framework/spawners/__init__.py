@@ -16,6 +16,6 @@ SPAWNERS = {
 }
 
 
-THREAD_SPAWNERS = ["thread", "greedy_thread"]
+THREAD_SPAWNERS = [ThreadSpawner, ThreadPoolSpawner]
 
-PROCESS_SPAWNERS = ["process", "greedy_process"]
+PROCESS_SPAWNERS = [ProcessSpawner, ProcessPoolSpawner]

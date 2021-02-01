@@ -7,6 +7,20 @@ from micro_framework.dependencies import Dependency, WorkerDependency
 from micro_framework.extensions import Extension
 
 
+async def call_dependencies(
+        dependencies: Dict, action: str, *args, **kwargs) -> Dict:
+    futures = []
+    names = []
+    for name, dependency in dependencies.items():
+        method = getattr(dependency, action)
+        futures.append(method(*args, **kwargs))
+        names.append(name)
+
+    results = await asyncio.gather(*futures)
+    ret = {name: result for name, result in zip(names, results)}
+    return ret
+
+
 class TargetExecutor:
     def __init__(self, config, target, dependencies, worker_dependencies):
         self._config = config
@@ -14,49 +28,88 @@ class TargetExecutor:
         self.worker_dependencies = worker_dependencies or {}
         self.target = target
 
-    def call_dependencies(
-            self, dependencies: Dict, action: str, *args, **kwargs) -> Dict:
-        results = {}
-        for name, dependency in dependencies.items():
-            method = getattr(dependency, action)
-            results[name] = method(*args, **kwargs)
-
-        return results
-
-    def run(self, *args, **kwargs):
-        self.call_dependencies(
+    async def pre_call(self):
+        await call_dependencies(
             self.worker_dependencies, "setup_dependency", self
         )
-        injected_worker_dependencies = self.call_dependencies(
+        self.injected_worker_dependencies = await call_dependencies(
             self.worker_dependencies, "get_dependency", self
         )
 
-        kwargs.update(**self.dependencies)
-        kwargs.update(**injected_worker_dependencies)
+    async def after_call(self):
+        await call_dependencies(
+            self.worker_dependencies, "after_call", self, self.result,
+            self.exception
+        )
+        if self.exception:
+            raise self.exception
 
-        exception = None
-        result = None
+    async def run_async(self, *args, **kwargs):
+        """
+        Run the async target function/method.
+
+        :return : Returns the target result
+        :raises: An Exception raised from the target can be raised.
+        """
+        await self.pre_call()
+        kwargs.update(**self.dependencies)
+        kwargs.update(**self.injected_worker_dependencies)
+
+        self.exception = None
+        self.result = None
         try:
-            result = self.target(*args, **kwargs)
+            self.result = await self.target(*args, **kwargs)
         except Exception as exc:
-            exception = exc
+            self.exception = exc
         finally:
-            self.call_dependencies(
-                self.worker_dependencies, "after_call", self, result, exception
-            )
-        if exception:
-            raise exception
-        return result
+            await self.after_call()
+        return self.result
+
+    def run(self, *args, **kwargs):
+        """
+        Run the target function/method synchronously.
+
+        This method is called when the worker has an executor to call the
+        target.
+
+        If the target is a coroutine and the worker_mode is asyncio,
+        then run_async should be called instead.
+
+        :return : Returns the target result
+        :raises: An Exception raised from the target can be raised.
+        """
+        event_loop = asyncio.get_event_loop()
+        asyncio.run_coroutine_threadsafe(
+            self.pre_call(),
+            event_loop
+        ).result()
+
+        kwargs.update(**self.dependencies)
+        kwargs.update(**self.injected_worker_dependencies)
+
+        self.exception = None
+        self.result = None
+        try:
+            self.result = self.target(*args, **kwargs)
+        except Exception as exc:
+            self.exception = exc
+        finally:
+            asyncio.run_coroutine_threadsafe(
+                self.after_call(),
+                event_loop
+            ).result()
+
+        return self.result
 
     @property
     def config(self):
         return self._config
 
+
 class ClassTargetExecutor(TargetExecutor):
     def __init__(self, config, class_instance, target_method,
                  class_worker_dependencies, target_dependencies,
                  target_worker_dependencies):
-
         super(ClassTargetExecutor, self).__init__(
             config, target_method, target_dependencies,
             target_worker_dependencies
@@ -64,29 +117,24 @@ class ClassTargetExecutor(TargetExecutor):
         self.class_instance = class_instance
         self.class_worker_dependencies = class_worker_dependencies
 
-    def run(self, *args, **kwargs):
-        self.call_dependencies(
+    async def pre_call(self):
+        await call_dependencies(
             self.class_worker_dependencies, "setup_dependency", self
         )
-        injected_cls_dependencies = self.call_dependencies(
+        injected_cls_dependencies = await call_dependencies(
             self.class_worker_dependencies, "get_dependency", self
         )
         for name, dep in injected_cls_dependencies.items():
             setattr(self.class_instance, name, dep)
-        exception = None
-        result = None
-        try:
-            result = super(ClassTargetExecutor, self).run(*args, **kwargs)
-        except Exception as exc:
-            exception = exc
-        finally:
-            self.call_dependencies(
-                self.class_worker_dependencies, "after_call", self, result,
-                exception
-            )
-        if exception:
-            raise exception
-        return result
+        return await super(ClassTargetExecutor, self).pre_call()
+
+    async def after_call(self):
+        await call_dependencies(
+            self.class_worker_dependencies, "after_call", self, self.result,
+            self.exception
+        )
+        return await super(ClassTargetExecutor, self).after_call()
+
 
 
 class Target(Extension):

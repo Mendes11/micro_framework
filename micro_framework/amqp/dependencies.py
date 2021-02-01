@@ -37,7 +37,7 @@ class Producer(WorkerDependency):
     def bind(self, runner, parent=None):
         return super(Producer, self).bind(runner, parent)
     
-    def get_dependency(self, worker):
+    async def get_dependency(self, worker):
         exchange = self.exchange
         def dispatch_event(event_name, payload):
             return dispatch(self.amqp_uri, exchange, event_name, payload)

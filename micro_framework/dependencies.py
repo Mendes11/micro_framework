@@ -120,19 +120,19 @@ class WorkerDependency(Dependency):
         ext.config = runner.config
         return ext
 
-    def setup_dependency(self, worker: Worker):
+    async def setup_dependency(self, worker: Worker):
         """
         Do any setup necessary before the dependency injection.
         """
         pass
 
-    def get_dependency(self, worker: Worker) -> Callable:
+    async def get_dependency(self, worker: Worker) -> Callable:
         """
         Injects the dependency that will be passed to the Target Function.
         """
         pass
 
-    def after_call(self, worker: Worker, result: Any, exc: Exception):
+    async def after_call(self, worker: Worker, result: Any, exc: Exception):
         """
         Cleanup after the function has finished or raised.
         """
