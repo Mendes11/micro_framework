@@ -92,7 +92,7 @@ def rpc_reply_queue() -> Queue:
     return Queue(
         name, exchange=exchange,
         routing_key=name, message_ttl=3600 * 24,
-        auto_delete=True
+        expires=3600 * 12 # Stays 12 Hours before being deleted.
     )
 
 
