@@ -39,9 +39,12 @@ class RunnerContext:
         assert len(routes) > 0, "routes must have a length higher than zero."
 
         self.routes = routes
-        self.worker_mode = worker_mode
-        self.max_workers = max_workers
-        self.max_tasks_per_child = max_tasks_per_child
+        self.config = {}
+        if max_workers:
+            self.config["MAX_WORKERS"] = max_workers
+
+        if worker_mode:
+            self.config["WORKER_MODE"] = worker_mode
 
         self.is_running = False
         self.spawned_extensions = {}
@@ -55,25 +58,18 @@ class RunnerContext:
         self.runner = runner
 
     async def setup(self):
-        self.config = self.runner.config
+        # Update this context config with the runner config to fill missing
+        # configurations.
+        self.config.update(self.runner.config)
         self.metric_server = self.runner.metric_server
 
-        if self.max_workers is None:
-            self.max_workers = self.config["MAX_WORKERS"]
-        if self.worker_mode is None:
-            self.worker_mode = self.config["WORKER_MODE"]
-        if self.max_tasks_per_child is None:
-            self.max_tasks_per_child = self.config["MAX_TASKS_PER_CHILD"]
-
         await self.bind_routes()
-        # await self._find_extensions()
         logger.debug(f"Extensions: {self.extensions}")
 
         info.labels(self.metric_label).info(
             {
-                'max_workers': str(self.max_workers),
-                'worker_mode': self.worker_mode,
-                'max_tasks_per_child': str(self.max_tasks_per_child)
+                'max_workers': str(self.config["MAX_WORKERS"]),
+                'worker_mode': self.config["WORKER_MODE"],
             }
         )
         available_workers.labels(self.metric_label).set(self.available_workers)
@@ -125,8 +121,8 @@ class RunnerContext:
     async def start(self):
         self.event_loop = asyncio.get_event_loop()
         logger.info(
-            f"Starting Runner with {self.max_workers}"
-            f" {self.worker_mode} workers"
+            f"Starting Runner with {self.config['MAX_WORKERS']}"
+            f" {self.config['WORKER_MODE']} workers"
         )
 
         logger.debug(f"Extensions: {self.extensions}")
@@ -144,10 +140,7 @@ class RunnerContext:
         # Finally, we start all extensions.
         self.is_running = True
         await self._call_extensions_action('start')
-        self.spawner = await self.runner.get_spawner(
-            self.worker_mode, max_workers=self.max_workers,
-            max_tasks_per_child=self.max_tasks_per_child
-        )
+        self.spawner = await self.runner.get_spawner(self)
 
     async def stop(self):
         self.is_running = False
@@ -271,6 +264,10 @@ class RunnerContext:
             raise future.exception()
 
     @property
+    def max_workers(self):
+        return self.config["MAX_WORKERS"]
+
+    @property
     def available_workers(self):
         return self.max_workers - self.running_routes
 
@@ -310,14 +307,16 @@ class Runner:
             self.singletons[type(extension)] = extension
         self.extensions.add(extension)
 
-    async def get_spawner(self, spawner_type, **spawner_configs):
+    async def get_spawner(self, runner_context: RunnerContext):
         """
         Returns and register a new spawner instance.
         :param str spawner_type: The type of the Spawner
         :param spawner_configs: That spawner configurations
         :return Spawner: A spawner instance.
         """
-        spawner = SPAWNERS[spawner_type](**spawner_configs)
+        spawner = SPAWNERS[runner_context.config["WORKER_MODE"]](
+            runner_context.config
+        )
         self.spawners.append(spawner)
         return spawner
 

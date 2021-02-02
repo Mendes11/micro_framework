@@ -24,8 +24,8 @@ def thread_worker(executor, write_queue, stop_event: threading.Event):
 
 
 class ThreadSpawner(Spawner, _base.Executor):
-    def __init__(self, max_workers=3, **kwargs):
-        self.max_workers = max_workers
+    def __init__(self, config):
+        self.max_workers = config.get("MAX_WORKERS")
         self._pool = []
         self._stop_map = {}
         self.ctx = multiprocessing.get_context()
@@ -116,13 +116,10 @@ class ThreadSpawner(Spawner, _base.Executor):
 
 
 class ThreadPoolSpawner(Spawner, ThreadPoolExecutor):
-    def __init__(self, max_workers=None, thread_name_prefix='',
-                 initializer=None, initargs=(), **kwargs):
-        super(ThreadPoolSpawner, self).__init__(
-            max_workers, thread_name_prefix, initializer, initargs
-        )
+    def __init__(self, config):
+        super(ThreadPoolSpawner, self).__init__(config.get("MAX_WORKERS"))
 
-    def shutdown(self, wait: bool = ...) -> None:
+    def shutdown(self, **kwargs) -> None:
         logger.info("Greedy Worker shutdown initiated, wait until all pending "
                     "tasks are consumed.")
-        super(ThreadPoolSpawner, self).shutdown(wait)
+        super(ThreadPoolSpawner, self).shutdown(**kwargs)
