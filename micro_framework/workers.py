@@ -21,7 +21,6 @@ def _start_worker_event_loop():
     and therefore can't access the main event-loop
     """
     event_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(event_loop)
     event_loop_thread = Thread(
         target=event_loop.run_forever, daemon=True
     )
@@ -30,7 +29,7 @@ def _start_worker_event_loop():
     return event_loop, event_loop_thread
 
 
-def executor_task(func, *fn_args, new_event_loop=False, **fn_kwargs):
+def executor_task(func, *fn_args, **fn_kwargs):
     """
     Function to execute a task using a spawner.
 
@@ -42,10 +41,9 @@ def executor_task(func, *fn_args, new_event_loop=False, **fn_kwargs):
     :return: Function Result
     :raises: Function Exceptions
     """
-    event_loop = None
-    event_loop_thread = None
-    if new_event_loop:
-        event_loop, event_loop_thread = _start_worker_event_loop()
+    #  Why in thread mode we get a lock if using the runner's event-loop.
+    event_loop, event_loop_thread = _start_worker_event_loop()
+    asyncio.set_event_loop(event_loop)
 
     try:
         result = func(*fn_args, **fn_kwargs)
@@ -87,11 +85,10 @@ class Worker:
 
             if spawner: # Run it outside the event-loop
                 event_loop = asyncio.get_event_loop()
-                new_event_loop = type(spawner) in PROCESS_SPAWNERS
                 fn = partial(
-                    executor_task, mounted_target.run, *fn_args,
-                    new_event_loop=new_event_loop, **fn_kwargs
+                    executor_task, mounted_target.run, *fn_args, **fn_kwargs
                 )
+
                 self.result = await event_loop.run_in_executor(spawner, fn)
 
             else: # When no spawner is given, we consider it an asyncio target.
