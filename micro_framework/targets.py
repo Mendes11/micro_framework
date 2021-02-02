@@ -3,7 +3,7 @@ import inspect
 from functools import partial
 from typing import Union, Callable, Dict
 
-from micro_framework.dependencies import Dependency, WorkerDependency
+from micro_framework.dependencies import Dependency, RunnerDependency
 from micro_framework.extensions import Extension
 
 
@@ -22,23 +22,23 @@ async def call_dependencies(
 
 
 class TargetExecutor:
-    def __init__(self, config, target, dependencies, worker_dependencies):
+    def __init__(self, config, target, dependencies, runner_dependencies):
         self._config = config
         self.dependencies = dependencies
-        self.worker_dependencies = worker_dependencies or {}
+        self.runner_dependencies = runner_dependencies or {}
         self.target = target
 
     async def pre_call(self):
         await call_dependencies(
-            self.worker_dependencies, "setup_dependency", self
+            self.dependencies, "setup_dependency", self
         )
-        self.injected_worker_dependencies = await call_dependencies(
-            self.worker_dependencies, "get_dependency", self
+        self.injected_dependencies = await call_dependencies(
+            self.dependencies, "get_dependency", self
         )
 
     async def after_call(self):
         await call_dependencies(
-            self.worker_dependencies, "after_call", self, self.result,
+            self.dependencies, "after_call", self, self.result,
             self.exception
         )
         if self.exception:
@@ -52,8 +52,8 @@ class TargetExecutor:
         :raises: An Exception raised from the target can be raised.
         """
         await self.pre_call()
-        kwargs.update(**self.dependencies)
-        kwargs.update(**self.injected_worker_dependencies)
+        kwargs.update(**self.runner_dependencies) # Already loaded from runner
+        kwargs.update(**self.injected_dependencies)
 
         self.exception = None
         self.result = None
@@ -84,8 +84,8 @@ class TargetExecutor:
             event_loop
         ).result()
 
-        kwargs.update(**self.dependencies)
-        kwargs.update(**self.injected_worker_dependencies)
+        kwargs.update(**self.runner_dependencies)
+        kwargs.update(**self.injected_dependencies)
 
         self.exception = None
         self.result = None
@@ -108,21 +108,21 @@ class TargetExecutor:
 
 class ClassTargetExecutor(TargetExecutor):
     def __init__(self, config, class_instance, target_method,
-                 class_worker_dependencies, target_dependencies,
-                 target_worker_dependencies):
+                 class_dependencies, target_runner_dependencies,
+                 target_dependencies):
         super(ClassTargetExecutor, self).__init__(
-            config, target_method, target_dependencies,
-            target_worker_dependencies
+            config, target_method, target_runner_dependencies,
+            target_dependencies
         )
         self.class_instance = class_instance
-        self.class_worker_dependencies = class_worker_dependencies
+        self.class_dependencies = class_dependencies
 
     async def pre_call(self):
         await call_dependencies(
-            self.class_worker_dependencies, "setup_dependency", self
+            self.class_dependencies, "setup_dependency", self
         )
         injected_cls_dependencies = await call_dependencies(
-            self.class_worker_dependencies, "get_dependency", self
+            self.class_dependencies, "get_dependency", self
         )
         for name, dep in injected_cls_dependencies.items():
             setattr(self.class_instance, name, dep)
@@ -130,7 +130,7 @@ class ClassTargetExecutor(TargetExecutor):
 
     async def after_call(self):
         await call_dependencies(
-            self.class_worker_dependencies, "after_call", self, self.result,
+            self.class_dependencies, "after_call", self, self.result,
             self.exception
         )
         return await super(ClassTargetExecutor, self).after_call()
@@ -145,24 +145,26 @@ class Target(Extension):
     injected.
 
     After all setup, the worker will call its mount_target method, passing the
-    worker instance. This method will return a partial with the target
-    dependencies injected.
+    worker instance. This method will return a TargetExecutor with the target
+    RunnerDependencies injected and the Dependencies to be injected.
 
     """
     def __init__(self, target):
-        self._dependencies = {}
+        self._runner_dependencies = {}
+        self.all_dependencies = {}
         self._target = target
         self.populate_dependencies()
 
     def populate_dependencies(self):
-        dependencies = getattr(self.target, "__dependencies__", {})
-        self._worker_dependencies = {}
+        self.all_dependencies = getattr(self.target, "__dependencies__", {})
         self._dependencies = {}
-        for name, dependency in dependencies.items():
-            if isinstance(dependency, WorkerDependency):
-                # WorkerDependencies are handled inside the worker.
-                self._worker_dependencies[name] = dependency
+        self._runner_dependencies = {}
+        for name, dependency in self.all_dependencies.items():
+            if isinstance(dependency, RunnerDependency):
+                # RunnerDependencies are handled outside the worker.
+                self._runner_dependencies[name] = dependency
             else:
+                # Dependencies are handled inside the worker
                 self._dependencies[name] = dependency
 
         self._target = getattr(self.target, "__original_function", self.target)
@@ -182,26 +184,25 @@ class Target(Extension):
 
     async def on_worker_setup(self, worker):
         return await self.call_dependencies(
-            self._dependencies, "setup_dependency", worker
+            self._runner_dependencies, "setup_dependency", worker
         )
 
     async def mount_target(self, worker):
         """
-        Prepare this target by returning a callable with all dependency
-        arguments already loaded in a partial.
+        Prepare this target by returning a TargetExecutor.
         """
         dependencies = await self.call_dependencies(
-            self._dependencies, "get_dependency", worker
+            self._runner_dependencies, "get_dependency", worker
         )
         executor_instance = TargetExecutor(
             self.runner.config, self.target,
-            dependencies, self._worker_dependencies
+            dependencies, self._dependencies
         )
         return executor_instance
 
     async def on_worker_finished(self, worker):
         return await self.call_dependencies(
-            self._dependencies, "after_call", worker, worker.result,
+            self._runner_dependencies, "after_call", worker, worker.result,
             worker.exception
         )
 
@@ -254,7 +255,7 @@ class Target(Extension):
         return {
             name: param
             for name, param in inspect.signature(self.target).parameters.items()
-            if name not in self._dependencies
+            if name not in self.all_dependencies
         }
 
     def __str__(self):
@@ -273,11 +274,11 @@ class TargetFunction(Target):
             )
             ext._dependencies[name] = extension
 
-        for name, dependency in ext._worker_dependencies.items():
+        for name, dependency in ext._runner_dependencies.items():
             extension = ext.bind_new_extension(
                 name, dependency, runner, ext
             )
-            ext._worker_dependencies[name] = extension
+            ext._runner_dependencies[name] = extension
 
         return ext
 
@@ -297,17 +298,17 @@ class TargetClassMethod(Target):
         super(TargetClassMethod, self).__init__(method)
         # The Superclass will handle all method handling, here we will extend
         # it to the class.
-        self._class_dependencies = {}
+        self._class_runner_dependencies = {}
         self.populate_class_dependencies()
 
     def populate_class_dependencies(self):
         dependencies = inspect.getmembers(
             self.target_class, lambda x: isinstance(x, Dependency)
         )
-        self._class_worker_dependencies = {}
+        self._class_dependencies = {}
         for name, dependency in dependencies:
-            if isinstance(dependency, WorkerDependency):
-                self._class_worker_dependencies[name] = dependency
+            if isinstance(dependency, RunnerDependency):
+                self._class_runner_dependencies[name] = dependency
             else:
                 self._class_dependencies[name] = dependency
 
@@ -320,44 +321,44 @@ class TargetClassMethod(Target):
             )
             ext._class_dependencies[name] = extension
 
-        for name, dependency in ext._class_worker_dependencies.items():
+        for name, dependency in ext._class_runner_dependencies.items():
             extension = ext.bind_new_extension(
                 name, dependency, runner, ext
             )
-            ext._class_worker_dependencies[name] = extension
+            ext._class_runner_dependencies[name] = extension
 
         return ext
 
     async def on_worker_setup(self, worker):
         await super(TargetClassMethod, self).on_worker_setup(worker)
         return await self.call_dependencies(
-            self._class_dependencies, "setup_dependency", worker
+            self._class_runner_dependencies, "setup_dependency", worker
         )
 
     async def mount_target(self, worker):
         cls = await self.get_class_instance(worker)
         dependencies = await self.call_dependencies(
-            self._dependencies, "get_dependency", worker
+            self._runner_dependencies, "get_dependency", worker
         )
         return ClassTargetExecutor(
             self.runner.config, cls, getattr(cls, self.target_method),
-            self._class_worker_dependencies, dependencies,
-            self._worker_dependencies
+            self._class_dependencies, dependencies,
+            self._dependencies
         )
 
     async def on_worker_finished(self, worker):
         await super(TargetClassMethod, self).on_worker_finished(worker)
         return await self.call_dependencies(
-            self._class_dependencies, "after_call", worker, worker.result,
-            worker.exception
+            self._class_runner_dependencies, "after_call", worker,
+            worker.result, worker.exception
         )
 
     async def get_class_instance(self, worker):
-        class_dependencies = await self.call_dependencies(
-            self._class_dependencies, "get_dependency", worker
+        injected_cls_runner_dependencies = await self.call_dependencies(
+            self._class_runner_dependencies, "get_dependency", worker
         )
         cls = self.target_class()
-        for name, dependency in class_dependencies.items():
+        for name, dependency in injected_cls_runner_dependencies.items():
             setattr(cls, name, dependency)
         return cls
 

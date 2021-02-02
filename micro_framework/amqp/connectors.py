@@ -6,7 +6,7 @@ from kombu import Queue
 from micro_framework.amqp.amqp_elements import rpc_exchange, \
     rpc_routing_key, rpc_broadcast_routing_key, Publisher
 from micro_framework.amqp.manager import RPCManager
-from micro_framework.amqp.rpc import listen_to_correlation, lock
+from micro_framework.amqp.rpc import RPCReplyListener, _PicklableReplyListener
 from micro_framework.rpc import RPCConnector, RPCConnection
 
 
@@ -22,12 +22,14 @@ class RPCProducer(Publisher, RPCConnection):
     """
 
     def __init__(
-            self, amqp_uri, target_service: str, reply_to_queue: Queue,
+            self, amqp_uri, target_service: str,
+            reply_listener: _PicklableReplyListener,
             **kwargs
     ):
         super(RPCProducer, self).__init__(amqp_uri, **kwargs)
         self.target_service = target_service
-        self.reply_to_queue = reply_to_queue
+        self.reply_listener = reply_listener
+        self.reply_to_queue = reply_listener.queue
 
     def send(self, payload, *args, **kwargs):
         payload = json.loads(payload)
@@ -41,7 +43,7 @@ class RPCProducer(Publisher, RPCConnection):
             routing_key = rpc_routing_key(
                 self.target_service, target_id=target_id
             )
-        with lock:
+        with self.reply_listener.producer_lock:
             # The publisher was raising some errors regarding wrong message
             # codes. Probably due to some concurrent call.
             # TODO This shouldn't have happened since we instantiate a new
@@ -58,7 +60,7 @@ class RPCProducer(Publisher, RPCConnection):
 
         # Notify our reply listener of a new correlation_id that will have
         # ListenerReceiver.
-        receiver = listen_to_correlation(corr_id)
+        receiver = self.reply_listener.register_new_correlation(corr_id)
         self.send(
             *args, correlation_id=corr_id,
             reply_to=self.reply_to_queue.routing_key,
@@ -83,14 +85,15 @@ class AMQPRPCConnector(RPCConnector):
     """
 
     def __init__(
-            self, amqp_uri: str, target_service: str, reply_to_queue: Queue
+            self, amqp_uri: str, target_service: str,
+            reply_listener: _PicklableReplyListener
     ):
         self.amqp_uri = amqp_uri
         self.target_service = target_service
-        self.reply_to_queue = reply_to_queue
+        self.reply_listener = reply_listener
 
     def get_connection(self):
         return RPCProducer(
-            self.amqp_uri, reply_to_queue=self.reply_to_queue,
+            self.amqp_uri, reply_listener=self.reply_listener,
             target_service=self.target_service
         )
