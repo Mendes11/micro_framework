@@ -1,4 +1,5 @@
 import logging
+from functools import partial
 from typing import Dict
 
 from kombu import Exchange, producers
@@ -6,7 +7,7 @@ from kombu import Exchange, producers
 from micro_framework.amqp.amqp_elements import get_connection
 from micro_framework.amqp.connectors import AMQPRPCConnector
 from micro_framework.amqp.rpc import RPCReplyListener
-from micro_framework.dependencies import Dependency
+from micro_framework.dependencies import Dependency, RunnerDependency
 from micro_framework.rpc import RPCDependency
 
 logger = logging.getLogger(__name__)
@@ -32,19 +33,18 @@ class Producer(Dependency):
         return {
             'confirm_publish': self.confirm_publish
         }
-
+    
+    def bind(self, runner, parent=None):
+        return super(Producer, self).bind(runner, parent)
+    
     async def get_dependency(self, worker):
         exchange = self.exchange
-
-        def publish(event_name, payload):
-            return dispatch(
-                self.amqp_uri, exchange, event_name, payload,
-            )
-
-        return publish
+        def dispatch_event(event_name, payload):
+            return dispatch(self.amqp_uri, exchange, event_name, payload)
+        return dispatch_event
 
 
-class RPCProxyProvider(RPCDependency):
+class RPCProxyProvider(RPCDependency, RunnerDependency):
     """
     Provides a RPCProxy with AMQPRPCConnector.
     """
@@ -60,7 +60,7 @@ class RPCProxyProvider(RPCDependency):
         return {
             "amqp_uri": self.config.get("AMQP_URI"),
             "target_service": self.target_service,
-            "reply_to_queue": self.reply_listener.queue,
+            "reply_listener": self.reply_listener.picklable_listener,
         }
 
 

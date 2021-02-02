@@ -1,7 +1,4 @@
-import inspect
 import logging
-
-from functools import partial
 
 from micro_framework.exceptions import ExtensionIsStopped
 from micro_framework.extensions import Extension

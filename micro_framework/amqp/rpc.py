@@ -1,5 +1,6 @@
 import logging
-import multiprocessing
+import time
+from multiprocessing import Pipe, Manager
 
 from micro_framework.amqp.amqp_elements import rpc_reply_queue, rpc_exchange
 from micro_framework.amqp.entrypoints import BaseEventListener
@@ -33,17 +34,26 @@ class ListenerReceiver:
         return self.connection.recv()
 
 
-m = multiprocessing.Manager()
-_correlations_queue = m.Queue()
-lock = m.Lock()
-_correlation_ids = m.dict()
+class _CorrelationResultIntent:
+    def __init__(self, correlation_id, sender):
+        self.correlation_id = correlation_id
+        self.sender = sender
+
+    def reply_to_sender(self, reply):
+        if not self.sender.closed and self.sender.writable:
+            return self.sender.send(reply)
+        raise ValueError("Reply sender is closed.")
 
 
 def listen_to_correlation(correlation_id):
-    global _correlation_ids
-    receiver, sender = multiprocessing.Pipe(duplex=False)
-    with lock:
-        _correlation_ids[correlation_id] = sender
+    global _correlations_queue
+    print("Listen to: ", correlation_id)
+    receiver, sender = Pipe(duplex=False)
+    print("Sending to Queue")
+    _correlations_queue.put(
+        _CorrelationResultIntent(correlation_id, sender)
+    )
+    print("Put finished")
     return ListenerReceiver(receiver)
 
 
@@ -55,9 +65,33 @@ class RPCReplyListener(BaseEventListener):
     internal = True
 
     async def setup(self):
+        global _correlations_queue, manager
+        self.mp_manager = Manager()
+
         self._reply_queue = rpc_reply_queue()
         self.routing_key = self._reply_queue.routing_key
+        self.running = False
+
+        self.producer_lock = self.mp_manager.Lock()
+        self.replies_lock = self.mp_manager.Lock()
+
+        # This is a shared variable between all processes. It maps the
+        # correlation ids and their intents to be returned to the user.
+        self.reply_intents = self.mp_manager.dict()
+        self.replies = {}
         await super(RPCReplyListener, self).setup()
+
+    async def start(self):
+        self.running = True
+        await self.runner.spawn_extension(
+            self, self.reply_sender
+        )
+        await super(RPCReplyListener, self).start()
+
+    async def stop(self):
+        self.running = False
+        _correlations_queue.put(None)
+        await super(RPCReplyListener, self).stop()
 
     async def get_exchange(self):
         return rpc_exchange()
@@ -65,15 +99,30 @@ class RPCReplyListener(BaseEventListener):
     async def get_queue(self):
         return self._reply_queue
 
-    async def read_correlations_queue(self):
-        global _correlation_ids
-        while not _correlations_queue.empty():
-            sender, corr_id = _correlations_queue.get_nowait()
-            with lock:
-                _correlation_ids[corr_id] = sender
+    def reply_sender(self):
+        while self.running:
+            if not self.replies:
+                time.sleep(.1)
+                continue
+            with self.replies_lock:
+                replies = list(self.replies.items())
+            for corr_id, reply in replies:
+                intent = self.reply_intents.get(corr_id)
+                if not intent:
+                    continue
+                intent.reply_to_sender(reply)
+
+                with self.replies_lock:
+                    self.replies.pop(corr_id)
+                    self.reply_intents.pop(corr_id)
+
+            time.sleep(.1)
+
+    @property
+    def picklable_listener(self):
+        return _PicklableReplyListener(self)
 
     async def call_route(self, entry_id, *args, _meta=None, **kwargs):
-        global _correlation_ids
         # Any exception here will make the manager requeue the message
         # First we update our correlation_ids dict by emptying the
         # correlations_queue.
@@ -85,24 +134,25 @@ class RPCReplyListener(BaseEventListener):
             return
 
         body = args[0]
-        try:
-            if corr_id in _correlation_ids:
-                with lock:
-                    sender = _correlation_ids.pop(corr_id)
-                if not sender.closed and sender.writable:
-                    sender.send(body)
-                else:
-                    logger.error(
-                        "Sender is closed or not writable.{}, {}".format(
-                            sender.closed, sender.writable)
-                    )
-            else:
-                logger.error(
-                    "Correlation id: {} not found on "
-                    "_correlation_ids dict.".format(corr_id)
-                )
-        except Exception:
-            logger.exception(
-                "Error with ReplyListener when returning an answer from a "
-                "RPC call."
+        with self.replies_lock:
+            self.replies[corr_id] = body
+
+
+class _PicklableReplyListener:
+    """
+    A version of the ReplyListener to be sent to worker processes.
+    """
+
+    def __init__(self, reply_listener: RPCReplyListener):
+        self.producer_lock = reply_listener.producer_lock
+        self.replies_lock = reply_listener.replies_lock
+        self.reply_intents = reply_listener.reply_intents
+        self.queue = reply_listener.queue
+
+    def register_new_correlation(self, correlation_id):
+        receiver, sender = Pipe(duplex=False)
+        with self.replies_lock:
+            self.reply_intents[correlation_id] = _CorrelationResultIntent(
+                correlation_id, sender
             )
+        return ListenerReceiver(receiver)

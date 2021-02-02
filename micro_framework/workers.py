@@ -1,10 +1,57 @@
 import asyncio
 import inspect
 import logging
+from threading import Thread
 
 from functools import partial
 
+from micro_framework.spawners import PROCESS_SPAWNERS
+
 logger = logging.getLogger(__name__)
+
+
+def _start_worker_event_loop():
+    """
+    Starts an event-loop and set is as the event-loop for the current process.
+
+    The event-loop would be already running inside a Thread, returned from
+    the function.
+
+    It should be called only for process workers that spawn a new process
+    and therefore can't access the main event-loop
+    """
+    event_loop = asyncio.new_event_loop()
+    event_loop_thread = Thread(
+        target=event_loop.run_forever, daemon=True
+    )
+    event_loop_thread.start()
+
+    return event_loop, event_loop_thread
+
+
+def executor_task(func, *fn_args, **fn_kwargs):
+    """
+    Function to execute a task using a spawner.
+
+    :param self:
+    :param func: Function to be called
+    :param fn_args: Function args
+    :param new_event_loop: If a new event-loop should be started.
+    :param fn_kwargs: Function kwargs
+    :return: Function Result
+    :raises: Function Exceptions
+    """
+    #  Why in thread mode we get a lock if using the runner's event-loop.
+    event_loop, event_loop_thread = _start_worker_event_loop()
+    asyncio.set_event_loop(event_loop)
+
+    try:
+        result = func(*fn_args, **fn_kwargs)
+    finally:
+        if event_loop:
+            event_loop.call_soon_threadsafe(event_loop.stop)
+            event_loop_thread.join()  # wait until completely closed.
+    return result
 
 
 class Worker:
@@ -33,14 +80,22 @@ class Worker:
         self.finished = False
         self._meta = _meta or {}  # Content shared by extensions
 
-    async def call_task(self, executor, fn, *fn_args, **fn_kwargs):
+    async def call_task(self, spawner, mounted_target, *fn_args, **fn_kwargs):
         try:
-            if inspect.iscoroutinefunction(fn):
-                self.result = await fn(*fn_args, **fn_kwargs)
-            else:
-                func = partial(fn, *fn_args, **fn_kwargs)
+
+            if spawner: # Run it outside the event-loop
                 event_loop = asyncio.get_event_loop()
-                self.result = await event_loop.run_in_executor(executor, func)
+                fn = partial(
+                    executor_task, mounted_target.run, *fn_args, **fn_kwargs
+                )
+
+                self.result = await event_loop.run_in_executor(spawner, fn)
+
+            else: # When no spawner is given, we consider it an asyncio target.
+                self.result = await mounted_target.run_async(
+                    *fn_args, **fn_kwargs
+                )
+
         except Exception as exc:
             self.exception = exc
             logger.exception("")

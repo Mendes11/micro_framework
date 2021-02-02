@@ -2,6 +2,8 @@ import signal
 from concurrent.futures import _base
 from logging import getLogger
 
+from loky.backend import get_context
+
 logger = getLogger(__name__)
 
 
@@ -59,3 +61,6 @@ class Task:
             self.future.set_result(result)
         except Exception as _exc:
             self.future.set_exception(_exc)
+
+
+ctx = get_context()

@@ -1,24 +1,20 @@
 amqp package
 ============
 
+Package containing all AMQP Related Entrypoints/Dependencies.
+
+
 Submodules
 ----------
 
 amqp.dependencies module
 ------------------------
-
-.. automodule:: micro_framework.amqp.dependencies
-   :members:
-   :undoc-members:
-   :show-inheritance:
+dependencies
 
 amqp.entrypoints module
 -----------------------
 
-.. automodule:: micro_framework.amqp.entrypoints
-   :members:
-   :undoc-members:
-   :show-inheritance:
+
 
 amqp.manager module
 -------------------
