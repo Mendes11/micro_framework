@@ -2,11 +2,14 @@ import logging
 from threading import Lock
 
 from functools import partial
+from kombu import Consumer
 from kombu.mixins import ConsumerMixin
 from kombu.pools import producers
 
 from micro_framework.amqp.amqp_elements import rpc_queue, rpc_exchange, \
-    rpc_broadcast_queue, get_connection
+    rpc_broadcast_queue, get_connection, Publisher, \
+    get_rpc_target_id_from_routing_key
+from micro_framework.amqp.exceptions import DuplicatedListener
 from micro_framework.exceptions import ExtensionIsStopped, PoolStopped, \
     RPCTargetDoesNotExist
 from micro_framework.extensions import Extension
@@ -19,6 +22,7 @@ class ConsumerManager(Extension, ConsumerMixin):
     def __init__(self):
         self.queues = {}
         self._consumers = []
+        self.entrypoint_map = {} # exchange.routing_key -> Entrypoint
         self.run_thread = None
         self.connection = None
         # Lock due to message object apparently not being thread-safe...
@@ -35,6 +39,9 @@ class ConsumerManager(Extension, ConsumerMixin):
         logger.info(
             "Error connecting to broker at {} ({}).\n"
             "Retrying in {} seconds.".format(self.amqp_uri, exc, interval))
+
+    def _entrypoint_key(self, exchange, routing_key):
+        return f"{exchange}.{routing_key}"
 
     async def get_connection(self):
         if not self.connection:
@@ -61,31 +68,42 @@ class ConsumerManager(Extension, ConsumerMixin):
         queue = entrypoint.queue
         self.queues[queue] = entrypoint
 
-    def get_consumers(self, Consumer, channel):
+    def get_consumers(self, _, channel):
         internal_queues = set()
-        internal_callbacks = set()
         normal_queues = set()
-        normal_callbacks = set()
 
         for queue, entrypoint in self.queues.items():
-            callback = partial(self.on_message, entrypoint)
+
+
             if entrypoint.internal:
                 internal_queues.add(queue)
-                internal_callbacks.add(callback)
             else:
                 normal_queues.add(queue)
-                normal_callbacks.add(callback)
+
+            entrypoint_key = self._entrypoint_key(
+                queue.exchange.name, queue.routing_key
+            )
+            if entrypoint_key in self.entrypoint_map:
+                raise DuplicatedListener(
+                    "You cannot define a listener to the same set "
+                    "({}, {}) in the same RunnerContext.".format(
+                        queue.exchange.name, queue.routing_key
+                    )
+                )
+            self.entrypoint_map[entrypoint_key] = entrypoint
 
         self._consumers = [
             Consumer(
+                channel,
                 queues=normal_queues,
-                callbacks=normal_callbacks,
+                callbacks=[self.on_message],
                 no_ack=False,
                 prefetch_count=self.runner.max_workers
             ),
             Consumer(
+                channel.connection.channel(),
                 queues=internal_queues,
-                callbacks=internal_callbacks,
+                callbacks=[self.on_message],
                 no_ack=False,
             )
         ]
@@ -104,24 +122,34 @@ class ConsumerManager(Extension, ConsumerMixin):
         else:
             await self.ack_message(message)
 
-    def on_message(self, entrypoint, body, message):
+    def on_message(self, body, message):
         logger.debug("Message Received")
+        entrypoint_key = self._entrypoint_key(
+            message.delivery_info["exchange"],
+            message.delivery_info["routing_key"]
+        )
+        entrypoint = self.entrypoint_map.get(entrypoint_key)
+
+        if entrypoint is None:
+            message.ack()
+            return
+
         if not self.should_stop:
-            self.runner.execute_async(
-                self.handle_new_message(entrypoint, body, message)
-            )
+            try:
+                self.runner.execute_async(
+                    self.handle_new_message(entrypoint, body, message),
+                    raise_for_future=False
+                )
+            except (PoolStopped, ExtensionIsStopped):
+                message.requeue()
         else:
             message.requeue()
 
     async def ack_message(self, message):
-        # TODO using async we won't need this lock anymore. After all
-        #  convertion is completed, remove this and test it.
-        with self.message_lock:  # One message at a time to prevent errors.
-            message.ack()
+        message.ack()
 
     async def requeue_message(self, message):
-        with self.message_lock:
-            message.requeue()
+        message.requeue()
 
 
 class RPCManager(RPCManagerMixin, ConsumerMixin):
@@ -158,29 +186,29 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
             logger.debug("AMQP RPCManager stopped.")
             self.started = False
 
-    def get_consumers(self, Consumer, channel):
+    def get_consumers(self, _, channel):
         exchange = rpc_exchange()
         queues = set()
-        callbacks = set()
         broadcast_queue = rpc_broadcast_queue(
             self.runner.config["SERVICE_NAME"]
         )
+
         for target_id, entrypoint in self.entrypoints.items():
-            callback = partial(self.on_message, entrypoint)
             queue = rpc_queue(
                 self.runner.config["SERVICE_NAME"], target_id, exchange
             )
             queues.add(queue)
-            callbacks.add(callback)
 
         self._consumers = [
             Consumer(
+                channel,
                 queues=queues,
-                callbacks=callbacks,
+                callbacks=[self.on_message],
                 no_ack=False,
                 prefetch_count=self.runner.max_workers
             ),
             Consumer(
+                channel.connection.channel(), # Get new channel.
                 queues=[broadcast_queue],
                 callbacks=[self.on_broadcast_message],
                 no_ack=False,
@@ -191,22 +219,24 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
 
     async def send_reply(self, message, payload):
         """
-        Send to the RPC Response to the Reply Queue
+        Send the RPC Response to the Reply Queue
         :param message:
         :param future:
         :return:
         """
         exchange = rpc_exchange()
-        routing_key = message.properties["reply_to"]
-        correlation_id = message.properties["correlation_id"]
-        def dispatch():
-            connection = get_connection(self.amqp_uri)
-            with producers[connection].acquire(block=True) as producer:
-                return producer.publish(
-                    payload, exchange=exchange, routing_key=routing_key,
-                    correlation_id=correlation_id, retry=True
-                )
-        await self.runner.event_loop.run_in_executor(None, dispatch)
+        routing_key = message.properties.get("reply_to")
+        correlation_id = message.properties.get("correlation_id")
+        if not routing_key or not correlation_id:
+            # Nothing to do here. Might be some unknown message.
+            return
+
+        publisher = Publisher(self.amqp_uri)
+        publish = partial(
+            publisher.publish, payload, exchange=exchange,
+            routing_key=routing_key, correlation_id=correlation_id, retry=True
+        )
+        await self.runner.event_loop.run_in_executor(None, publish)
 
     async def handle_new_call(self, target_ids, body, message):
         """
@@ -229,24 +259,32 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
                     )
                 )
             await self.send_reply(message, response)
-            await self.ack_message(message)
         except Exception:
-            logger.exception("")
+            logger.exception("Error on handling a RPCManager call")
             await self.requeue_message(message)
+        else:
+            await self.ack_message(message)
 
-    def on_message(self, entrypoint, body, message):
+    def on_message(self, body, message):
         logger.debug("AMQP RPC Message Received")
         if not self.should_stop:
             try:
+
+                target_id = get_rpc_target_id_from_routing_key(
+                    self.runner.config["SERVICE_NAME"],
+                    message.delivery_info["routing_key"]
+                ) # We can infer the target by getting the routing key.
+
                 # Calling the async method to handle the new message.
-                target_ids = [str(entrypoint.route.target)]
                 self.runner.execute_async(
-                    self.handle_new_call(target_ids, body, message)
+                    self.handle_new_call([target_id], body, message),
+                    raise_for_future=False
                 )
                 return
             except (ExtensionIsStopped, PoolStopped):
-                pass
-        message.requeue()
+                message.requeue()
+        else:
+            message.requeue()
 
     def on_broadcast_message(self, body, message):
         logger.debug("AMQP RPC Broadcast Message Received")
@@ -258,9 +296,9 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
                 )
                 return
             except (ExtensionIsStopped, PoolStopped):
-                pass
-
-        message.requeue()
+                message.requeue()
+        else:
+            message.requeue()
 
     async def ack_message(self, message):
         message.ack()

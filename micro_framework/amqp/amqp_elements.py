@@ -51,6 +51,11 @@ def rpc_routing_key(service_name, target_id):
     return "{}.{}".format(service_name, target_id)
 
 
+def get_rpc_target_id_from_routing_key(service_name, routing_key):
+    _, target_id = routing_key.split("{}.".format(service_name))
+    return target_id
+
+
 def rpc_broadcast_routing_key(service_name, target_id):
     return "{}._broadcast.{}".format(service_name, target_id)
 
