@@ -1,11 +1,13 @@
 import inspect
 import json
+import logging
 
 from micro_framework.exceptions import RPCTargetDoesNotExist
 from micro_framework.extensions import Extension
 from .formatters import format_rpc_response
 from ..entrypoints import Entrypoint
 
+logger = logging.getLogger(__name__)
 
 async def target_detail(entrypoint: Entrypoint):
     """
@@ -137,7 +139,16 @@ class RPCManagerMixin(Extension):
         :return str: RPC Response
         """
         if not isinstance(message, dict):
-            message = json.loads(message)
+            try:
+                message = json.loads(message)
+            except json.JSONDecodeError as exc:
+                logger.error(
+                    "RPCManager received unknown message structure: {}".format(
+                        message
+                    )
+                )
+                return format_rpc_response(None, exc)
+
         command = message['command']
         command_args = message.get('command_args', [])
         command_kwargs = message.get('command_kwargs', {})

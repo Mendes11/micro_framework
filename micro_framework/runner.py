@@ -32,13 +32,13 @@ class RunnerContext:
     spawners (and therefore the max_workers number)
     """
     def __init__(
-            self, routes, worker_mode=None, max_workers=None,
-            max_tasks_per_child=None, context_metric_label=None
+            self, routes=None, worker_mode=None, max_workers=None,
+            context_metric_label=None
     ):
-        assert isinstance(routes, list), "routes must be a list."
-        assert len(routes) > 0, "routes must have a length higher than zero."
+        if routes is None:
+            routes = []
 
-        self.routes = routes
+        self.routes = []
         self.config = {}
         if max_workers:
             self.config["MAX_WORKERS"] = max_workers
@@ -53,6 +53,11 @@ class RunnerContext:
         self.context_singletons = {} # {type: instance}
         self.metric_label = context_metric_label or f"context_{id(self)}"
         self.running_routes = 0
+        self.add_routes(*routes)
+
+    def add_routes(self, *routes):
+        self.routes += routes
+        return self
 
     async def bind(self, runner):
         self.runner = runner
@@ -208,7 +213,7 @@ class RunnerContext:
 
         return worker
 
-    def execute_async(self, coroutine):
+    def execute_async(self, coroutine, raise_for_future=True):
         """
         Executes a coroutine in the background, without awaiting it.
 
@@ -220,7 +225,7 @@ class RunnerContext:
         """
         future = asyncio.run_coroutine_threadsafe(coroutine, self.event_loop)
         def on_finished_task(future):
-            if future.exception():
+            if future.exception() and raise_for_future:
                 raise future.exception()
         future.add_done_callback(on_finished_task)
         return future
@@ -277,14 +282,16 @@ class RunnerContext:
 
 
 class Runner:
-    def __init__(self, contexts, config, metric_server=None):
-        assert isinstance(contexts, list), "contexts must be a list"
-        assert len(contexts) > 0, "contexts list must have at least one " \
-                                  "RunnerContext"
+    def __init__(self, contexts=None, config=None, metric_server=None):
+        if contexts is None:
+            contexts = []
+
+        if config is None:
+            config = {}
 
         self.spawners = []
         self.config = FrameworkConfig(config)
-        if isinstance(contexts[0], Route):
+        if contexts and isinstance(contexts[0], Route):
             contexts = [RunnerContext(contexts)]
         self.contexts = contexts
         self.metric_server = metric_server
@@ -295,6 +302,17 @@ class Runner:
         asyncio.run_coroutine_threadsafe(self._stop(), self.event_loop)
         if context.get("exception"):
             raise context.get("exception")
+
+    def add_contexts(self, *contexts):
+        self.contexts += contexts
+
+    def new_context(
+            self, routes=None, worker_mode=None, max_workers=None,
+            context_metric_label=None, inplace=False):
+        ctx = RunnerContext(routes, worker_mode, max_workers, context_metric_label)
+        if inplace:
+            self.add_contexts(ctx)
+        return ctx
 
     def register_extension(self, extension):
         if extension.singleton:
