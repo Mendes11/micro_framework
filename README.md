@@ -9,6 +9,10 @@ but with some different concepts regarding the function call.
 ## DOCS
 https://python-micro-framework.readthedocs.io/en/latest/
 
+## Python Version Requirement
+
+* python 3.6 or higher
+
 ## INSTALL
 `pip install micro_framework`
 
