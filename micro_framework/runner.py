@@ -65,7 +65,9 @@ class RunnerContext:
     async def setup(self):
         # Update this context config with the runner config to fill missing
         # configurations.
-        self.config.update(self.runner.config)
+        self.config = FrameworkConfig(
+            self.config, default_config=self.runner.config
+        )
         self.metric_server = self.runner.metric_server
 
         await self.bind_routes()
