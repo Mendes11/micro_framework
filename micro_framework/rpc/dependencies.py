@@ -1,6 +1,6 @@
 import json
 
-from micro_framework.dependencies import Dependency
+from micro_framework.dependencies import Dependency, RunnerDependency
 from micro_framework.rpc.connectors import RPCConnector
 from .formatters import format_rpc_command
 from .proxies import RPCProxy
@@ -66,7 +66,7 @@ class RPCDependencyMixin:
         return response
 
 
-class RPCDependency(RPCDependencyMixin, Dependency):
+class RPCDependency(RPCDependencyMixin, RunnerDependency):
     """
     Dependency Provider that injects a RPCProxy into the worker's target.
     """

@@ -44,7 +44,7 @@ class Producer(Dependency):
         return dispatch_event
 
 
-class RPCProxyProvider(RPCDependency, RunnerDependency):
+class RPCProxyProvider(RPCDependency):
     """
     Provides a RPCProxy with AMQPRPCConnector.
     """
