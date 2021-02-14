@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from threading import Lock
 
@@ -60,7 +61,6 @@ class ConsumerManager(Extension, ConsumerMixin):
         if self.started:
             logger.debug("AMQP ConsumerManager is stopping")
             self.should_stop = True
-            self.connection.close()
             logger.debug("AMQP ConsumerManager stopped.")
             self.started = False
 

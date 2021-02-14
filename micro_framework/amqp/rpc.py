@@ -1,8 +1,10 @@
+import asyncio
 import logging
 import time
 from multiprocessing import Pipe, Manager
 
-from micro_framework.amqp.amqp_elements import rpc_reply_queue, rpc_exchange
+from micro_framework.amqp.amqp_elements import rpc_reply_queue, rpc_exchange, \
+    get_connection
 from micro_framework.amqp.entrypoints import BaseEventListener
 
 logger = logging.getLogger(__name__)
@@ -45,18 +47,6 @@ class _CorrelationResultIntent:
         raise ValueError("Reply sender is closed.")
 
 
-def listen_to_correlation(correlation_id):
-    global _correlations_queue
-    print("Listen to: ", correlation_id)
-    receiver, sender = Pipe(duplex=False)
-    print("Sending to Queue")
-    _correlations_queue.put(
-        _CorrelationResultIntent(correlation_id, sender)
-    )
-    print("Put finished")
-    return ListenerReceiver(receiver)
-
-
 class RPCReplyListener(BaseEventListener):
     """
     Listens to any RPCReply for this service
@@ -65,7 +55,6 @@ class RPCReplyListener(BaseEventListener):
     internal = True
 
     async def setup(self):
-        global _correlations_queue, manager
         self.mp_manager = Manager()
 
         self._reply_queue = rpc_reply_queue()
@@ -89,9 +78,19 @@ class RPCReplyListener(BaseEventListener):
         await super(RPCReplyListener, self).start()
 
     async def stop(self):
+        """
+        At stop, we delete the Reply Queue because it is not needed anymore.
+        (Because it is unique per running service and therefore,
+        if we restart the service a new queue name will be generated).
+
+        """
+        await self.manager.stop()
         self.running = False
-        _correlations_queue.put(None)
-        await super(RPCReplyListener, self).stop()
+        # We need to wait 1 second due to the manager's ConsumerMixin timeout
+        # to identify that the Consumer should stop. Otherwise an exception
+        # will be generated because of the Consumer losing the queue reference.
+        await asyncio.sleep(1)
+        self._reply_queue.delete()
 
     async def get_exchange(self):
         return rpc_exchange()
