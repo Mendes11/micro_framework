@@ -157,9 +157,10 @@ class RunnerContext:
         # Stopping Routes
         await self._call_extensions_action('stop', extension_set=self.routes)
 
-        # Stop Workers
-        logger.debug("Stopping workers")
-        self.spawner.stop(wait=True)
+        if self.spawner:
+            # Stop Workers
+            logger.debug("Stopping workers")
+            self.spawner.stop(wait=True)
 
         logger.debug("Stopping extra extensions")
         await self._call_extensions_action(
@@ -365,7 +366,7 @@ class Runner:
         # TODO Ensure that all spawner pools are stopped so then we stop the
         #  rest
         cancel_contexts = [context.stop() for context in self.contexts]
-        await asyncio.gather(*cancel_contexts, return_exceptions=True)
+        await asyncio.gather(*cancel_contexts)
 
         if sys.version_info[1] < 7:
             tasks = [
@@ -377,9 +378,8 @@ class Runner:
                 t for t in asyncio.all_tasks() if t is not asyncio.current_task()
             ]
         for task in tasks: task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks)
         await self.metric_server.stop()
-        self.event_loop.stop()
         logger.info("Runner stopped")
 
 
