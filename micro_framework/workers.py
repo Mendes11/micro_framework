@@ -102,8 +102,7 @@ class Worker:
 
         return self.result
 
-    async def run(self, runner):
-        self.runner = runner
+    async def setup_target(self):
         await self.target.on_worker_setup(self)
 
         # Translating Messages if there is any translator
@@ -115,12 +114,20 @@ class Worker:
             )
 
         mounted_target = await self.target.mount_target(self)
+        return mounted_target
+
+    async def finish_target(self):
+        await self.target.on_worker_finished(self)
+
+    async def run(self, runner):
+        self.runner = runner
+        mounted_target = await self.setup_target()
         await self.call_task(
             runner.spawner, mounted_target, *self.translated_args,
             **self.translated_kwargs
         )
         self.finished = True
-        await self.target.on_worker_finished(self)
+        await self.finish_target()
         return self
 
 

@@ -68,16 +68,11 @@ class Dependency(Extension):
     """
     picklable = True
 
-    def bind(self, runner, parent=None):
-        ext = super(Dependency, self).bind(runner, parent=None)
-        ext.config = runner.config
-        return ext
-
     async def setup_dependency(self, worker: Worker):
         """
         Do any setup necessary before the dependency injection.
         """
-        pass
+        self.config = worker.config
 
     async def get_dependency(self, worker: Worker) -> Callable:
         """
@@ -143,14 +138,13 @@ class RunnerDependency(Dependency):
     def bind(self, runner, parent=None):
         ext = super(Dependency, self).bind(runner, parent=parent)
         ext.target = parent
-        ext.config = runner.config
         return ext
 
     async def setup_dependency(self, worker: Worker):
         """
         Do any setup necessary before the dependency injection.
         """
-        pass
+        self.config = worker.config
 
     async def get_dependency(self, worker: Worker) -> Callable:
         """

@@ -334,6 +334,9 @@ class Runner:
         :param spawner_configs: That spawner configurations
         :return Spawner: A spawner instance.
         """
+        if runner_context.config["WORKER_MODE"] == "asyncio":
+            return None
+
         spawner = SPAWNERS[runner_context.config["WORKER_MODE"]](
             runner_context.config
         )

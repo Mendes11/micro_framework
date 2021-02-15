@@ -155,6 +155,8 @@ class Target(Extension):
         self._target = target
         self.populate_dependencies()
 
+    target_executor_class = TargetExecutor
+
     def populate_dependencies(self):
         self.all_dependencies = getattr(self.target, "__dependencies__", {})
         self._dependencies = {}
@@ -194,7 +196,7 @@ class Target(Extension):
         dependencies = await self.call_dependencies(
             self._runner_dependencies, "get_dependency", worker
         )
-        executor_instance = TargetExecutor(
+        executor_instance = self.target_executor_class(
             self.runner.config, self.target,
             dependencies, self._dependencies
         )
@@ -301,6 +303,8 @@ class TargetClassMethod(Target):
         self._class_runner_dependencies = {}
         self.populate_class_dependencies()
 
+    target_executor_class = ClassTargetExecutor
+
     def populate_class_dependencies(self):
         dependencies = inspect.getmembers(
             self.target_class, lambda x: isinstance(x, Dependency)
@@ -340,7 +344,7 @@ class TargetClassMethod(Target):
         dependencies = await self.call_dependencies(
             self._runner_dependencies, "get_dependency", worker
         )
-        return ClassTargetExecutor(
+        return self.target_executor_class(
             self.runner.config, cls, getattr(cls, self.target_method),
             self._class_dependencies, dependencies,
             self._dependencies

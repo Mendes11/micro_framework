@@ -86,11 +86,13 @@ class RPCReplyListener(BaseEventListener):
         """
         await self.manager.stop()
         self.running = False
+        self.mp_manager.shutdown()
         # We need to wait 1 second due to the manager's ConsumerMixin timeout
         # to identify that the Consumer should stop. Otherwise an exception
         # will be generated because of the Consumer losing the queue reference.
         await asyncio.sleep(1)
         self._reply_queue.delete()
+        await super(RPCReplyListener, self).stop()
 
     async def get_exchange(self):
         return rpc_exchange()
@@ -101,8 +103,9 @@ class RPCReplyListener(BaseEventListener):
     def reply_sender(self):
         while self.running:
             if not self.replies:
-                time.sleep(.1)
+                time.sleep(.01)
                 continue
+
             with self.replies_lock:
                 replies = list(self.replies.items())
             for corr_id, reply in replies:
@@ -115,7 +118,7 @@ class RPCReplyListener(BaseEventListener):
                     self.replies.pop(corr_id)
                     self.reply_intents.pop(corr_id)
 
-            time.sleep(.1)
+            time.sleep(.01)
 
     @property
     def picklable_listener(self):
