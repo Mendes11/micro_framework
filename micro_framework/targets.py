@@ -204,7 +204,7 @@ class Target(Extension):
         )
         executor_instance = self.target_executor_class(
             self.runner.config, self.target,
-            dependencies, self._dependencies
+            self._dependencies, dependencies
         )
         return executor_instance
 

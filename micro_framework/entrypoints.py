@@ -53,17 +53,8 @@ class TimeEntrypoint(Entrypoint):
         self.interval = interval
         self.running = False
 
-    async def start(self):
-        """
-        Start a loop that sleeps for a configured interval and then call the
-        bind Route.
-
-        Since it runs in a loop, some caution should be taken to prevent it
-        from locking the event loop.
-        """
-        self.running = True
+    async def _run_timer(self):
         last_time = timer()
-
         while self.running:
             elapsed_time = timer() - last_time
             sleep_time = self.interval - elapsed_time
@@ -77,5 +68,19 @@ class TimeEntrypoint(Entrypoint):
             except (ExtensionIsStopped, PoolStopped):
                 pass
 
+    async def start(self):
+        """
+        Start a loop that sleeps for a configured interval and then call the
+        bind Route.
+
+        Since it runs in a loop, some caution should be taken to prevent it
+        from locking the event loop.
+        """
+        self.running = True
+        # Since the runner call this using gather, we must run it with
+        # ensure_future, so we don't stop the event-loop forever
+        asyncio.ensure_future(self._run_timer())
+
     async def stop(self):
         self.running = False
+
