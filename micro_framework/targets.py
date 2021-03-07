@@ -79,6 +79,12 @@ class TargetExecutor:
         :raises: An Exception raised from the target can be raised.
         """
         event_loop = asyncio.get_event_loop()
+        if inspect.iscoroutinefunction(self.target):
+            return asyncio.run_coroutine_threadsafe(
+                self.run_async(*args, **kwargs),
+                event_loop
+            ).result()
+
         asyncio.run_coroutine_threadsafe(
             self.pre_call(),
             event_loop
