@@ -202,7 +202,7 @@ class Target(Extension):
         )
         executor_instance = TargetExecutor(
             self.runner.config, self.target,
-            dependencies, self._dependencies
+            self._dependencies, dependencies
         )
         return executor_instance
 
