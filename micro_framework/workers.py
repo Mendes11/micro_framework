@@ -33,7 +33,6 @@ def executor_task(func, *fn_args, **fn_kwargs):
     """
     Function to execute a task using a spawner.
 
-    :param self:
     :param func: Function to be called
     :param fn_args: Function args
     :param new_event_loop: If a new event-loop should be started.
