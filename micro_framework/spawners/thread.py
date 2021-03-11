@@ -1,8 +1,8 @@
+import sys
 import logging
 import multiprocessing
 import threading
 from concurrent.futures import _base, ThreadPoolExecutor
-from concurrent.futures._base import BrokenExecutor
 from multiprocessing.queues import Queue
 from queue import Empty
 
@@ -121,10 +121,19 @@ class ThreadPoolSpawner(Spawner, ThreadPoolExecutor):
         super(ThreadPoolSpawner, self).__init__(config.get("MAX_WORKERS"))
 
     def submit(self, *args, **kwargs):
-        try:
-            return super(ThreadPoolSpawner, self).submit(*args, **kwargs)
-        except (BrokenExecutor, BrokenPipeError) as exc:
-            raise BrokenSpawner from exc
+        if sys.version_info.minor < 7:
+            try:
+                return super(ThreadPoolSpawner, self).submit(
+                    *args, **kwargs
+                )
+            except BrokenPipeError as exc:
+                raise BrokenSpawner from exc
+        else:
+            from concurrent.futures._base import BrokenExecutor
+            try:
+                return super(ThreadPoolSpawner, self).submit(*args, **kwargs)
+            except (BrokenExecutor, BrokenPipeError) as exc:
+                raise BrokenSpawner from exc
 
     def shutdown(self, **kwargs) -> None:
         logger.info("Greedy Worker shutdown initiated, wait until all pending "
