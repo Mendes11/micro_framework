@@ -12,7 +12,7 @@ from timeit import default_timer
 
 from micro_framework.config import FrameworkConfig
 from micro_framework.entrypoints import Entrypoint
-from micro_framework.exceptions import ExtensionIsStopped
+from micro_framework.exceptions import ExtensionIsStopped, BrokenSpawner
 from micro_framework.extensions import Extension
 from micro_framework.metrics import PrometheusMetricServer, tasks_counter, \
     tasks_number, tasks_failures_counter, tasks_duration, info, \
@@ -47,6 +47,7 @@ class RunnerContext:
             self.config["WORKER_MODE"] = worker_mode
 
         self.is_running = False
+        self.spawner = None
         self.spawned_extensions = {}
         self.entrypoints = set()
         self.extra_extensions = set()
@@ -149,7 +150,7 @@ class RunnerContext:
         await self._call_extensions_action('start')
         self.spawner = await self.runner.get_spawner(self)
 
-    async def stop(self):
+    async def stop(self, wait=True):
         self.is_running = False
 
         logger.info("Stopping all context extensions and workers")
@@ -157,9 +158,10 @@ class RunnerContext:
         # Stopping Routes
         await self._call_extensions_action('stop', extension_set=self.routes)
 
-        # Stop Workers
-        logger.debug("Stopping workers")
-        self.spawner.stop(wait=True)
+        if self.spawner:
+            # Stop Workers
+            logger.debug("Stopping workers")
+            self.spawner.stop(wait=wait)
 
         logger.debug("Stopping extra extensions")
         await self._call_extensions_action(
@@ -198,7 +200,13 @@ class RunnerContext:
         # create a task, the await will automatically giveup on the lock and
         # only return when the task in the worker is done.
         self.running_routes += 1
-        await worker.run(self)
+        try:
+            await worker.run(self)
+        except BrokenSpawner:
+            # Unrecoverable error. It's better to simply stop everything
+            # without even acknowledging messages.
+            await self.runner._stop(wait=False)
+            raise
         self.running_routes -= 1
 
         # Update the metrics after the worker is finished.
@@ -334,6 +342,9 @@ class Runner:
         :param spawner_configs: That spawner configurations
         :return Spawner: A spawner instance.
         """
+        if runner_context.config["WORKER_MODE"] == "asyncio":
+            return None
+
         spawner = SPAWNERS[runner_context.config["WORKER_MODE"]](
             runner_context.config
         )
@@ -358,10 +369,10 @@ class Runner:
         for context in self.contexts:
             await context.start()
 
-    async def _stop(self):
+    async def _stop(self, wait=True):
         # TODO Ensure that all spawner pools are stopped so then we stop the
         #  rest
-        cancel_contexts = [context.stop() for context in self.contexts]
+        cancel_contexts = [context.stop(wait=wait) for context in self.contexts]
         await asyncio.gather(*cancel_contexts, return_exceptions=True)
 
         if sys.version_info[1] < 7:
@@ -376,7 +387,7 @@ class Runner:
         for task in tasks: task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         await self.metric_server.stop()
-        self.event_loop.stop()
+        self.event_loop.call_soon_threadsafe(self.event_loop.stop)
         logger.info("Runner stopped")
 
 

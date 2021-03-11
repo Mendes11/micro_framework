@@ -2,9 +2,10 @@ import logging
 import signal
 
 
-from loky.process_executor import ProcessPoolExecutor
+from loky.process_executor import ProcessPoolExecutor, BrokenProcessPool
 
 from micro_framework.spawners.base import Spawner
+from micro_framework.exceptions import BrokenSpawner
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,12 @@ class ProcessPoolSpawner(Spawner, ProcessPoolExecutor):
             timeout=timeout,
             initializer=process_initializer
         )
+
+    def submit(self, *args, **kwargs):
+        try:
+            return super(ProcessPoolSpawner, self).submit(*args, **kwargs)
+        except BrokenProcessPool as exc:
+            raise BrokenSpawner from exc
 
     def shutdown(self, **kwargs) -> None:
         logger.info(

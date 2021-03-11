@@ -18,7 +18,7 @@ setuptools.setup(
     'Programming Language :: Python :: 3.8',
     'Programming Language :: Python :: 3.9'],
     install_requires=[
-        "kombu>=4.6.8,<5", "websockets>=8.1", "websocket-client>=0.57.0",
-        "prometheus-client>=0.8.0", "loky>=2.9.0"
+        "kombu>=4.6.8,<5", "websockets>=8.1,<9", "websocket-client>=0.57.0,<1",
+        "prometheus-client>=0.8.0,<1", "loky>=2.9.0,<3", "psutil"
     ],
 )

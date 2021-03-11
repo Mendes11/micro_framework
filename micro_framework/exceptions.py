@@ -35,3 +35,6 @@ class RPCAsyncResponse(FrameworkException):
     We raise an exception instead of returning None because None could be the
     desired response.
     """
+
+class BrokenSpawner(FrameworkException):
+    ...

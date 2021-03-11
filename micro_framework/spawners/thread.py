@@ -2,10 +2,11 @@ import logging
 import multiprocessing
 import threading
 from concurrent.futures import _base, ThreadPoolExecutor
+from concurrent.futures._base import BrokenExecutor
 from multiprocessing.queues import Queue
 from queue import Empty
 
-from micro_framework.exceptions import PoolStopped
+from micro_framework.exceptions import PoolStopped, BrokenSpawner
 from micro_framework.spawners.base import Spawner, Task
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,12 @@ class ThreadSpawner(Spawner, _base.Executor):
 class ThreadPoolSpawner(Spawner, ThreadPoolExecutor):
     def __init__(self, config):
         super(ThreadPoolSpawner, self).__init__(config.get("MAX_WORKERS"))
+
+    def submit(self, *args, **kwargs):
+        try:
+            return super(ThreadPoolSpawner, self).submit(*args, **kwargs)
+        except (BrokenExecutor, BrokenPipeError) as exc:
+            raise BrokenSpawner from exc
 
     def shutdown(self, **kwargs) -> None:
         logger.info("Greedy Worker shutdown initiated, wait until all pending "
