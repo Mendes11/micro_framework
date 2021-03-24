@@ -37,7 +37,7 @@ class Producer(Dependency):
     def bind(self, runner, parent=None):
         return super(Producer, self).bind(runner, parent)
 
-    def setup(self):
+    async def setup(self):
         self._publisher = Publisher(self.amqp_uri)
 
     async def get_dependency(self, worker):
