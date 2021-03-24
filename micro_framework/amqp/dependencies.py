@@ -4,7 +4,7 @@ from typing import Dict
 
 from kombu import Exchange, producers
 
-from micro_framework.amqp.amqp_elements import get_connection
+from micro_framework.amqp.amqp_elements import get_connection, Publisher
 from micro_framework.amqp.connectors import AMQPRPCConnector
 from micro_framework.amqp.rpc import RPCReplyListener
 from micro_framework.dependencies import Dependency, RunnerDependency
@@ -36,11 +36,19 @@ class Producer(Dependency):
     
     def bind(self, runner, parent=None):
         return super(Producer, self).bind(runner, parent)
-    
+
+    def setup(self):
+        self._publisher = Publisher(self.amqp_uri)
+
     async def get_dependency(self, worker):
+        self.config = worker.config
         exchange = self.exchange
+
         def dispatch_event(event_name, payload):
-            return dispatch(self.amqp_uri, exchange, event_name, payload)
+            return self._publisher.publish(
+                payload, exchange=exchange, routing_key=event_name
+            )
+
         return dispatch_event
 
 
