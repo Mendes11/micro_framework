@@ -1,11 +1,8 @@
-import asyncio
 import logging
 from threading import Lock
 
-from functools import partial
 from kombu import Consumer
 from kombu.mixins import ConsumerMixin
-from kombu.pools import producers
 
 from micro_framework.amqp.amqp_elements import rpc_queue, rpc_exchange, \
     rpc_broadcast_queue, get_connection, Publisher, \
@@ -232,11 +229,11 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
             return
 
         publisher = Publisher(self.amqp_uri)
-        publish = partial(
+
+        await self.runner.sync_to_async(
             publisher.publish, payload, exchange=exchange,
             routing_key=routing_key, correlation_id=correlation_id, retry=True
         )
-        await self.runner.event_loop.run_in_executor(None, publish)
 
     async def handle_new_call(self, target_ids, body, message):
         """

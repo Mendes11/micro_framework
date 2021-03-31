@@ -21,7 +21,7 @@ async def call_dependencies(
     return ret
 
 
-class TargetExecutor:
+class AsyncTargetExecutor:
     def __init__(self, config, target, dependencies, runner_dependencies):
         self._config = config
         self.dependencies = dependencies
@@ -44,7 +44,7 @@ class TargetExecutor:
         if self.exception:
             raise self.exception
 
-    async def run_async(self, *args, **kwargs):
+    async def run(self, *args, **kwargs):
         """
         Run the async target function/method.
 
@@ -65,6 +65,8 @@ class TargetExecutor:
             await self.after_call()
         return self.result
 
+
+class TargetExecutor(AsyncTargetExecutor):
     def run(self, *args, **kwargs):
         """
         Run the target function/method synchronously.
@@ -79,12 +81,6 @@ class TargetExecutor:
         :raises: An Exception raised from the target can be raised.
         """
         event_loop = asyncio.get_event_loop()
-        if inspect.iscoroutinefunction(self.target):
-            return asyncio.run_coroutine_threadsafe(
-                self.run_async(*args, **kwargs),
-                event_loop
-            ).result()
-
         asyncio.run_coroutine_threadsafe(
             self.pre_call(),
             event_loop
@@ -112,11 +108,11 @@ class TargetExecutor:
         return self._config
 
 
-class ClassTargetExecutor(TargetExecutor):
+class ClassExecutorMixin:
     def __init__(self, config, class_instance, target_method,
                  class_dependencies, target_runner_dependencies,
                  target_dependencies):
-        super(ClassTargetExecutor, self).__init__(
+        super(ClassExecutorMixin, self).__init__(
             config, target_method, target_runner_dependencies,
             target_dependencies
         )
@@ -132,15 +128,22 @@ class ClassTargetExecutor(TargetExecutor):
         )
         for name, dep in injected_cls_dependencies.items():
             setattr(self.class_instance, name, dep)
-        return await super(ClassTargetExecutor, self).pre_call()
+        return await super(ClassExecutorMixin, self).pre_call()
 
     async def after_call(self):
         await call_dependencies(
             self.class_dependencies, "after_call", self, self.result,
             self.exception
         )
-        return await super(ClassTargetExecutor, self).after_call()
+        return await super(ClassExecutorMixin, self).after_call()
 
+
+class AsyncClassTargetExecutor(ClassExecutorMixin, AsyncTargetExecutor):
+    ...
+
+
+class ClassTargetExecutor(ClassExecutorMixin, TargetExecutor):
+    ...
 
 
 class Target(Extension):
@@ -161,7 +164,10 @@ class Target(Extension):
         self._target = target
         self.populate_dependencies()
 
-    target_executor_class = TargetExecutor
+    def get_target_executor_class(self):
+        if inspect.iscoroutinefunction(self.target):
+            return AsyncTargetExecutor
+        return TargetExecutor
 
     def populate_dependencies(self):
         self.all_dependencies = getattr(self.target, "__dependencies__", {})
@@ -202,7 +208,8 @@ class Target(Extension):
         dependencies = await self.call_dependencies(
             self._runner_dependencies, "get_dependency", worker
         )
-        executor_instance = self.target_executor_class(
+        target_executor_class = self.get_target_executor_class()
+        executor_instance = target_executor_class(
             self.runner.config, self.target,
             self._dependencies, dependencies
         )
@@ -309,7 +316,10 @@ class TargetClassMethod(Target):
         self._class_runner_dependencies = {}
         self.populate_class_dependencies()
 
-    target_executor_class = ClassTargetExecutor
+    def get_target_executor_class(self):
+        if inspect.iscoroutinefunction(self.target):
+            return AsyncClassTargetExecutor
+        return ClassTargetExecutor
 
     def populate_class_dependencies(self):
         dependencies = inspect.getmembers(
@@ -350,7 +360,8 @@ class TargetClassMethod(Target):
         dependencies = await self.call_dependencies(
             self._runner_dependencies, "get_dependency", worker
         )
-        return self.target_executor_class(
+        target_executor_class = self.get_target_executor_class()
+        return target_executor_class(
             self.runner.config, cls, getattr(cls, self.target_method),
             self._class_dependencies, dependencies,
             self._dependencies
