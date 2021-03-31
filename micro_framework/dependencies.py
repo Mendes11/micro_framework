@@ -74,6 +74,11 @@ class Dependency(Extension):
     """
     picklable = True
 
+    def bind(self, runner, parent=None):
+        ext = super(Dependency, self).bind(runner, parent=None)
+        ext.config = runner.config
+        return ext
+
     async def setup_dependency(self, worker: Worker):
         """
         Do any setup necessary before the dependency injection.
