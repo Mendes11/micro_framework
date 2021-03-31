@@ -169,6 +169,7 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
 
     async def setup(self):
         self.connection = await self.get_connection()
+        self.publisher = Publisher(self.amqp_uri)
 
     async def start(self):
         if not self.started:
@@ -228,12 +229,17 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
             # Nothing to do here. Might be some unknown message.
             return
 
-        publisher = Publisher(self.amqp_uri)
-
-        await self.runner.sync_to_async(
-            publisher.publish, payload, exchange=exchange,
-            routing_key=routing_key, correlation_id=correlation_id, retry=True
+        # TODO There is a memory leak when executing the publisher through an
+        #  executor... Maybe when changing from kombu to an async lib it
+        #  won't be a problem anymore.
+        self.publisher.publish(
+            payload, exchange=exchange, routing_key=routing_key,
+            correlation_id=correlation_id, retry=True
         )
+        # await self.runner.sync_to_async(
+        #     self.publisher.publish, payload, exchange=exchange,
+        #     routing_key=routing_key, correlation_id=correlation_id, retry=True
+        # )
 
     async def handle_new_call(self, target_ids, body, message):
         """

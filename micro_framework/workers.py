@@ -41,12 +41,11 @@ def executor_task(func, *fn_args, **fn_kwargs):
     """
     # TODO This fn might be responsibility of target module
     event_loop_thread = None
-    event_loop = None
+    event_loop = asyncio.new_event_loop()
 
     try:
         if inspect.iscoroutinefunction(func):
             # run the coroutine using a new event loop
-            event_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(event_loop)
             result = event_loop.run_until_complete(
                 func(*fn_args, **fn_kwargs)
@@ -60,15 +59,10 @@ def executor_task(func, *fn_args, **fn_kwargs):
             asyncio.set_event_loop(event_loop)
             result = func(*fn_args, **fn_kwargs)
     finally:
-        if event_loop:
-            event_loop.call_soon_threadsafe(event_loop.stop)
+        event_loop.close()
 
         if event_loop_thread:
             event_loop_thread.join()  # wait until completely closed.
-
-        if event_loop:
-            event_loop.close()
-
     return result
 
 
