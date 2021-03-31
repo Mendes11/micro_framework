@@ -5,11 +5,10 @@ from threading import Thread
 
 from functools import partial
 
-
 logger = logging.getLogger(__name__)
 
 
-def _start_worker_event_loop():
+def _start_worker_event_loop(event_loop):
     """
     Starts an event-loop and set is as the event-loop for the current process.
 
@@ -19,7 +18,6 @@ def _start_worker_event_loop():
     It should be called only for process workers that spawn a new process
     and therefore can't access the main event-loop
     """
-    event_loop = asyncio.new_event_loop()
     event_loop_thread = Thread(
         target=event_loop.run_forever, daemon=True
     )
@@ -30,11 +28,10 @@ def _start_worker_event_loop():
 
 def executor_task(func, *fn_args, **fn_kwargs):
     """
-    Function to execute a task using a spawner.
+    Function to execute a sync task using a spawner.
 
     :param func: Function to be called
     :param fn_args: Function args
-    :param new_event_loop: If a new event-loop should be started.
     :param fn_kwargs: Function kwargs
     :return: Function Result
     :raises: Function Exceptions
@@ -44,20 +41,12 @@ def executor_task(func, *fn_args, **fn_kwargs):
     event_loop = asyncio.new_event_loop()
 
     try:
-        if inspect.iscoroutinefunction(func):
-            # run the coroutine using a new event loop
-            asyncio.set_event_loop(event_loop)
-            result = event_loop.run_until_complete(
-                func(*fn_args, **fn_kwargs)
-            )
-
-        else:
-            # Run the function but starts a running event loop before,
-            # in order to the Target methods that are asyncio.
-            # TODO this is why this fn seems like it belongs to targets.py
-            event_loop, event_loop_thread = _start_worker_event_loop()
-            asyncio.set_event_loop(event_loop)
-            result = func(*fn_args, **fn_kwargs)
+        # Run the function but starts a running event loop before,
+        # in order to the Target methods that are asyncio.
+        # TODO this is why this fn seems like it belongs to targets.py
+        event_loop, event_loop_thread = _start_worker_event_loop(event_loop)
+        asyncio.set_event_loop(event_loop)
+        result = func(*fn_args, **fn_kwargs)
     finally:
         event_loop.close()
 
@@ -94,8 +83,14 @@ class Worker:
 
     async def call_task(self, spawner, mounted_target, *fn_args, **fn_kwargs):
         try:
-
-            if spawner: # Run it outside the event-loop
+            is_coroutine = inspect.iscoroutinefunction(mounted_target.run)
+            if spawner and is_coroutine:
+                raise TypeError(
+                    f"{mounted_target} is an Async Target but a spawner was"
+                    f" provided. Please either use an asyncio spawner or "
+                    f"transform the coroutine into a function/method"
+                )
+            elif spawner:  # Run it outside the event-loop
                 event_loop = asyncio.get_event_loop()
                 fn = partial(
                     executor_task, mounted_target.run, *fn_args, **fn_kwargs
@@ -103,8 +98,8 @@ class Worker:
 
                 self.result = await event_loop.run_in_executor(spawner, fn)
 
-            else: # When no spawner is given, we consider it an asyncio target.
-                self.result = await mounted_target.run_async(
+            else:  # When no spawner is given, we consider it an asyncio target.
+                self.result = await mounted_target.run(
                     *fn_args, **fn_kwargs
                 )
 
