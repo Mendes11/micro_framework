@@ -1,12 +1,8 @@
-import asyncio
-from pympler import tracker, classtracker
 import logging
 from threading import Lock
 
-from functools import partial
 from kombu import Consumer
 from kombu.mixins import ConsumerMixin
-from kombu.pools import producers
 
 from micro_framework.amqp.amqp_elements import rpc_queue, rpc_exchange, \
     rpc_broadcast_queue, get_connection, Publisher, \
