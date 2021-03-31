@@ -1,3 +1,4 @@
+import inspect
 import sys
 
 from functools import wraps
@@ -15,9 +16,14 @@ def inject(**dependencies):
                 f"{Dependency}"
             )
     def decorator(fn):
-        @wraps(fn)
-        def wrapped(*args, **kwargs):
-            return fn(*args, **kwargs)
+        if inspect.iscoroutinefunction(fn):
+            @wraps(fn)
+            async def wrapped(*args, **kwargs):
+                return await fn(*args, **kwargs)
+        else:
+            @wraps(fn)
+            def wrapped(*args, **kwargs):
+                return fn(*args, **kwargs)
         setattr(sys.modules[fn.__module__], fn.__name__, wrapped)
         wrapped.__dependencies__ = dependencies
         return wrapped

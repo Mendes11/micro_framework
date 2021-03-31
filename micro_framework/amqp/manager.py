@@ -1,4 +1,5 @@
 import asyncio
+from pympler import tracker, classtracker
 import logging
 from threading import Lock
 
@@ -232,11 +233,11 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
             return
 
         publisher = Publisher(self.amqp_uri)
-        publish = partial(
+
+        await self.runner.sync_to_async(
             publisher.publish, payload, exchange=exchange,
             routing_key=routing_key, correlation_id=correlation_id, retry=True
         )
-        await self.runner.event_loop.run_in_executor(None, publish)
 
     async def handle_new_call(self, target_ids, body, message):
         """

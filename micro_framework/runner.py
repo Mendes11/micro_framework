@@ -54,6 +54,7 @@ class RunnerContext:
         self.context_singletons = {} # {type: instance}
         self.metric_label = context_metric_label or f"context_{id(self)}"
         self.running_routes = 0
+        self.executor = None
         self.add_routes(*routes)
 
     def add_routes(self, *routes):
@@ -69,6 +70,7 @@ class RunnerContext:
         self.config = FrameworkConfig(
             self.config, default_config=self.runner.config
         )
+        self.executor = SPAWNERS["greedy_thread"]({})
         self.metric_server = self.runner.metric_server
 
         await self.bind_routes()
@@ -239,6 +241,10 @@ class RunnerContext:
                 raise future.exception()
         future.add_done_callback(on_finished_task)
         return future
+
+    async def sync_to_async(self, fn, *args, **kwargs):
+        fn = partial(fn, *args, **kwargs)
+        return await self.event_loop.run_in_executor(self.executor, fn)
 
     async def spawn_extension(
             self, extension, target_fn, *fn_args, **fn_kwargs
