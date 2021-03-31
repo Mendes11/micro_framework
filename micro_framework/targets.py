@@ -65,6 +65,10 @@ class AsyncTargetExecutor:
             await self.after_call()
         return self.result
 
+    @property
+    def config(self):
+        return self._config
+
 
 class TargetExecutor(AsyncTargetExecutor):
     def run(self, *args, **kwargs):
@@ -103,9 +107,6 @@ class TargetExecutor(AsyncTargetExecutor):
 
         return self.result
 
-    @property
-    def config(self):
-        return self._config
 
 
 class ClassExecutorMixin:
