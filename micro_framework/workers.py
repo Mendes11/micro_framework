@@ -86,9 +86,10 @@ class Worker:
             is_coroutine = inspect.iscoroutinefunction(mounted_target.run)
             if spawner and is_coroutine:
                 raise TypeError(
-                    f"{mounted_target} is an Async Target but a spawner was"
-                    f" provided. Please either use an asyncio spawner or "
-                    f"transform the coroutine into a function/method"
+                    f"{mounted_target} is an Async Target but a {spawner} "
+                    f"spawner was provided. Please either use an 'asyncio' "
+                    f"worker_mode or transform the coroutine into a "
+                    f"function/method"
                 )
             elif spawner:  # Run it outside the event-loop
                 event_loop = asyncio.get_event_loop()
