@@ -5,7 +5,6 @@ from threading import Thread
 
 from functools import partial
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +33,6 @@ def executor_task(func, *fn_args, **fn_kwargs):
 
     :param func: Function to be called
     :param fn_args: Function args
-    :param new_event_loop: If a new event-loop should be started.
     :param fn_kwargs: Function kwargs
     :return: Function Result
     :raises: Function Exceptions
@@ -103,8 +101,8 @@ class Worker:
 
                 self.result = await event_loop.run_in_executor(spawner, fn)
 
-            else: # When no spawner is given, we consider it an asyncio target.
-                self.result = await mounted_target.run_async(
+            else:  # When no spawner is given, we consider it an asyncio target.
+                self.result = await mounted_target.run(
                     *fn_args, **fn_kwargs
                 )
 
