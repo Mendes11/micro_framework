@@ -19,6 +19,7 @@ def _start_worker_event_loop():
     and therefore can't access the main event-loop
     """
     event_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(event_loop)
     event_loop_thread = Thread(
         target=event_loop.run_forever, daemon=True
     )
@@ -54,13 +55,13 @@ def executor_task(func, *fn_args, **fn_kwargs):
             # in order to the Target methods that are asyncio.
             # TODO this is why this fn seems like it belongs to targets.py
             event_loop, event_loop_thread = _start_worker_event_loop()
-            asyncio.set_event_loop(event_loop)
             result = func(*fn_args, **fn_kwargs)
     finally:
-        event_loop.close()
+        event_loop.call_soon_threadsafe(event_loop.stop)
 
         if event_loop_thread:
             event_loop_thread.join()  # wait until completely closed.
+        event_loop.close()
     return result
 
 
