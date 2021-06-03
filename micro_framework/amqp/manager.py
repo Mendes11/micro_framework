@@ -18,9 +18,8 @@ logger = logging.getLogger(__name__)
 
 class ConsumerManager(Extension, ConsumerMixin):
     def __init__(self):
+        self._clean()
         self.queues = {}
-        self._consumers = []
-        self.entrypoint_map = {} # exchange.routing_key -> Entrypoint
         self.run_thread = None
         self.connection = None
         # Lock due to message object apparently not being thread-safe...
@@ -33,10 +32,20 @@ class ConsumerManager(Extension, ConsumerMixin):
     def amqp_uri(self):
         return self.runner.config['AMQP_URI']
 
+    def _clean(self):
+        self._consumers = []
+        self.entrypoint_map = {}  # exchange.routing_key -> Entrypoint
+
     def on_connection_error(self, exc, interval):
         logger.info(
             "Error connecting to broker at {} ({}).\n"
-            "Retrying in {} seconds.".format(self.amqp_uri, exc, interval))
+            "Retrying in {} seconds.".format(self.amqp_uri, exc, interval)
+        )
+        logger.debug(
+            "Removing all previous consumers, since they will be "
+            "loaded again."
+        )
+        self._clean()
 
     def _entrypoint_key(self, exchange, routing_key):
         return f"{exchange}.{routing_key}"
