@@ -41,11 +41,6 @@ class ConsumerManager(Extension, ConsumerMixin):
             "Error connecting to broker at {} ({}).\n"
             "Retrying in {} seconds.".format(self.amqp_uri, exc, interval)
         )
-        logger.debug(
-            "Removing all previous consumers, since they will be "
-            "loaded again."
-        )
-        self._clean()
 
     def _entrypoint_key(self, exchange, routing_key):
         return f"{exchange}.{routing_key}"
@@ -75,6 +70,11 @@ class ConsumerManager(Extension, ConsumerMixin):
         self.queues[queue] = entrypoint
 
     def get_consumers(self, _, channel):
+        logger.debug(
+            "Removing all previous consumers, since they will be "
+            "loaded again."
+        )
+        self._clean()
         internal_queues = set()
         normal_queues = set()
 
