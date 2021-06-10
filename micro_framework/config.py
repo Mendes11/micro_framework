@@ -5,6 +5,7 @@ DEFAULT_CONFIG = dict(
     MAX_WORKERS=3,
     WORKER_MODE='thread',
     AMPQ_URI='amqp://guest:guest@localhost:5672',
+    AMQP_HEARTBEAT=10,
     ENABLE_METRICS=False,  # This is Preferable to avoid any port collision
     METRICS={
         'HOST': '0.0.0.0',
