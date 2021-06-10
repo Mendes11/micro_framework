@@ -95,7 +95,7 @@ class RPCReplyListener(BaseEventListener):
         conn.connect()
         self._reply_queue.bind(conn.channel())
         self._reply_queue.delete()
-        conn.close()
+        conn.release()
         await super(RPCReplyListener, self).stop()
 
     async def get_exchange(self):

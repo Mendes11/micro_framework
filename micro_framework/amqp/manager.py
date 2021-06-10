@@ -47,7 +47,10 @@ class ConsumerManager(Extension, ConsumerMixin):
 
     async def get_connection(self):
         if not self.connection:
-            self.connection = get_connection(self.amqp_uri)
+            heartbeats = self.runner.config.get("AMQP_HEARTBEAT")
+            self.connection = get_connection(
+                self.amqp_uri, heartbeat=heartbeats
+            )
         return self.connection
 
     async def setup(self):
@@ -173,7 +176,10 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
 
     async def get_connection(self):
         if not self.connection:
-            self.connection = get_connection(self.amqp_uri)
+            heartbeats = self.runner.config.get("AMQP_HEARTBEAT")
+            self.connection = get_connection(
+                self.amqp_uri, heartbeat=heartbeats
+            )
         return self.connection
 
     async def setup(self):

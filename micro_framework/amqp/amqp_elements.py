@@ -17,7 +17,7 @@ DEFAULT_TRANSPORT_OPTIONS = {
     'interval_max': 5
 }
 DEFAULT_RETRY_POLICY = {'max_retries': 3}
-DEFAULT_HEARTBEAT = 60
+DEFAULT_HEARTBEAT = 10
 DEFAULT_SERIALIZER = 'json'
 PERSISTENT = 2
 
@@ -106,10 +106,11 @@ default_transport_options = {
 }
 
 
-def get_connection(amqp_uri):
+def get_connection(amqp_uri, heartbeat=None):
+    if heartbeat is None: heartbeat = DEFAULT_HEARTBEAT
     connection = Connection(
         amqp_uri, transport_options=default_transport_options,
-        heartbeat=120
+        heartbeat=heartbeat
     )
     return connection
 
