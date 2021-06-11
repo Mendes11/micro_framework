@@ -17,7 +17,7 @@ DEFAULT_TRANSPORT_OPTIONS = {
     'interval_max': 5
 }
 DEFAULT_RETRY_POLICY = {'max_retries': 3}
-DEFAULT_HEARTBEAT = 10
+DEFAULT_HEARTBEAT = 120
 DEFAULT_SERIALIZER = 'json'
 PERSISTENT = 2
 
@@ -106,22 +106,29 @@ default_transport_options = {
 }
 
 
-def get_connection(amqp_uri, heartbeat=None):
+def get_connection(amqp_uri, heartbeat=None, ssl=None, transport_options=None):
     if heartbeat is None: heartbeat = DEFAULT_HEARTBEAT
+    if transport_options is None: transport_options = default_transport_options.copy()
+
     connection = Connection(
-        amqp_uri, transport_options=default_transport_options,
-        heartbeat=heartbeat
+        amqp_uri, transport_options=transport_options,
+        heartbeat=heartbeat, ssl=ssl
     )
     return connection
 
 
 @contextmanager
-def get_producer(amqp_uri, confirms=True, ssl=None, transport_options=None):
+def get_producer(
+        amqp_uri, confirms=True, ssl=None, transport_options=None,
+        heartbeat=None
+):
     if transport_options is None:
         transport_options = DEFAULT_TRANSPORT_OPTIONS.copy()
     transport_options['confirm_publish'] = confirms
-    conn = Connection(amqp_uri, transport_options=transport_options, ssl=ssl)
-
+    conn = get_connection(
+        amqp_uri, heartbeat=heartbeat, ssl=ssl,
+        transport_options=transport_options
+    )
     with producers[conn].acquire(block=True) as producer:
         yield producer
 
@@ -214,13 +221,14 @@ class Publisher:
 
     def __init__(
             self, amqp_uri, use_confirms=None, serializer=None,
-            compression=None,
+            compression=None, heartbeat=None,
             delivery_mode=None, mandatory=None, priority=None, expiration=None,
             declare=None, retry=None, retry_policy=None, ssl=None,
             **publish_kwargs
     ):
         self.amqp_uri = amqp_uri
         self.ssl = ssl
+        self.heartbeat = heartbeat
 
         # publish confirms
         if use_confirms is not None:
@@ -290,6 +298,7 @@ class Publisher:
                           use_confirms,
                           self.ssl,
                           transport_options,
+                          heartbeat=self.heartbeat
                           ) as producer:
             try:
                 producer.publish(

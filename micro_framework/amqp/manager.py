@@ -53,6 +53,10 @@ class ConsumerManager(Extension, ConsumerMixin):
             )
         return self.connection
 
+    async def get_channel(self):
+        if self.connection:
+            return self.connection.channel()
+
     async def setup(self):
         self.connection = await self.get_connection()
 
@@ -184,7 +188,8 @@ class RPCManager(RPCManagerMixin, ConsumerMixin):
 
     async def setup(self):
         self.connection = await self.get_connection()
-        self.publisher = Publisher(self.amqp_uri)
+        heartbeats = self.runner.config.get("AMQP_HEARTBEAT")
+        self.publisher = Publisher(self.amqp_uri, heartbeat=heartbeats)
 
     async def start(self):
         if not self.started:

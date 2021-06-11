@@ -72,7 +72,8 @@ class RPCProxyProvider(RPCDependency):
         }
 
 
-def dispatch(amqp_uri, exchange, routing_key, payload, **kwargs):
+def dispatch(amqp_uri, exchange, routing_key, payload, amqp_heartbeat=None,
+             **kwargs):
     """
     Helper to dispatch a single payload that will load the client and call
     the send method.
@@ -83,7 +84,7 @@ def dispatch(amqp_uri, exchange, routing_key, payload, **kwargs):
     :param Any payload:
     :param dict headers:
     """
-    connection = get_connection(amqp_uri)
+    connection = get_connection(amqp_uri, heartbeat=amqp_heartbeat)
     with producers[connection].acquire(block=True) as producer:
         return producer.publish(
             payload, exchange=exchange, routing_key=routing_key,

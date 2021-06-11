@@ -64,7 +64,7 @@ class BaseEventListener(Entrypoint):
         await super(BaseEventListener, self).setup()
         self.exchange = await self.get_exchange()
         self.queue = await self.get_queue()
-        self.queue.maybe_bind(await self.manager.get_connection())
+        self.queue.maybe_bind(await self.manager.get_channel())
         self.queue.declare()
         await self.manager.add_entrypoint(self)
 

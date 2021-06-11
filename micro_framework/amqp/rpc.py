@@ -91,7 +91,10 @@ class RPCReplyListener(BaseEventListener):
         # to identify that the Consumer should stop. Otherwise an exception
         # will be generated because of the Consumer losing the queue reference.
         await asyncio.sleep(1)
-        conn = get_connection(self.runner.config["AMQP_URI"])
+        conn = get_connection(
+            self.runner.config["AMQP_URI"],
+            heartbeat=self.runner.config.get("AMQP_HEARTBEAT")
+        )
         conn.connect()
         self._reply_queue.bind(conn.channel())
         self._reply_queue.delete()

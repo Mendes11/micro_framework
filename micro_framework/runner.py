@@ -49,8 +49,12 @@ class RunnerContext:
         self.is_running = False
         self.spawner = None
         self.spawned_extensions = {}
-        self.entrypoints = set()
-        self.extra_extensions = set()
+        self.entrypoints = []
+        self.extra_extensions = []
+
+        # Extensions added in their respective order of bind
+        # Use list to keep order of insertion
+        self.extensions = []
         self.context_singletons = {} # {type: instance}
         self.metric_label = context_metric_label or f"context_{id(self)}"
         self.running_routes = 0
@@ -84,21 +88,24 @@ class RunnerContext:
         )
         available_workers.labels(self.metric_label).set(self.available_workers)
 
-    async def _call_extensions_action(self, action, extension_set=None):
+    async def _call_extensions_action(self, action, extension_set=None,
+                                      reverse=False):
         if extension_set is None:
             extension_set = self.extensions
+
         tasks = [getattr(extension, action)() for extension in extension_set]
-        await asyncio.gather(*tasks)
+        if reverse:
+            tasks = tasks[::-1]
+
+        # The order matters here, so don't use asyncio.gather.
+        for task in tasks:
+            await task
 
     async def _find_extensions(self):
         for route in self.routes:
             extensions = await find_extensions(route)
             for extension in extensions:
                 await self.register_extension(extension)
-
-    @property
-    def extensions(self):
-        return {*self.routes, *self.entrypoints, *self.extra_extensions}
 
     async def bind_routes(self):
         binded_routes = []
@@ -111,9 +118,14 @@ class RunnerContext:
 
     def register_extension(self, extension):
         if isinstance(extension, Entrypoint) and not extension.singleton:
-            self.entrypoints.add(extension)
+            if extension not in self.entrypoints:
+                self.entrypoints.append(extension)
         else:
-            self.extra_extensions.add(extension)
+            if extension not in self.extra_extensions:
+                self.extra_extensions.append(extension)
+
+        if extension not in self.extensions:
+            self.extensions.append(extension)
 
         if extension.context_singleton:
             existing = self.context_singletons.get(type(extension))
@@ -138,13 +150,11 @@ class RunnerContext:
         logger.debug(f"Extensions: {self.extensions}")
 
         # Once we have all extensions detected:
-        # Setup Routes first then entrypoints and then extra extensions.
-        await self._call_extensions_action('setup', extension_set=self.routes)
+
+        # Setup from the inner extensions to the outer ones.
+        # extension attribute is already on this order.
         await self._call_extensions_action(
-            'setup', extension_set=self.entrypoints
-        )
-        await self._call_extensions_action(
-            'setup', extension_set=self.extra_extensions
+            "setup"
         )
 
         # Finally, we start all extensions.

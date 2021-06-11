@@ -208,7 +208,8 @@ class AsyncBackOff(BackOff, BaseEventListener):
         exchange = await self.get_exchange()
         dispatch(
             self.runner.config["AMQP_URI"], exchange, event_name,
-            retry_payload, headers={"x-delay": next_interval}
+            retry_payload, headers={"x-delay": next_interval},
+            amqp_heartbeat = self.runner.config.get("AMQP_HEARTBEAT")
         )
         return None
 
