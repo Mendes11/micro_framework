@@ -1,3 +1,4 @@
+import importlib
 import inspect
 import json
 
@@ -14,7 +15,16 @@ def import_exception(exception):
         return __builtins__[exception['exception']](exception['message'])
     elif exception["exception"] in fw_exceptions:
         return fw_exceptions[exception["exception"]](exception.get("message"))
-    return RPCException(exception)
+    try:
+        module = importlib.import_module(exception["module"])
+        exc = getattr(module, exception["exception"])
+        if hasattr(exc, "__setstate__") and exception.get("state"):
+            exc = exc()
+            exc.__setstate__(exception.get("state"))
+            return exc
+        return exc(exception["message"])
+    except (ModuleNotFoundError, ImportError, AttributeError, KeyError):
+        return RPCException(exception)
 
 
 def format_rpc_command(command, *args, **kwargs):
@@ -45,9 +55,12 @@ def format_rpc_response(data, exception=None):
     """
     exception_data = None
     if exception:
+        state = exception.__getstate__() if hasattr(exception, "__getstate__") else None
         exception_data = {
             'exception': type(exception).__name__,
             'message': str(exception),
+            'state': state,
+            'module': exception.__module__,
         }
     return json.dumps({
         'data': data,
