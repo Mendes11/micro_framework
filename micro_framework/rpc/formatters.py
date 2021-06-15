@@ -11,18 +11,18 @@ def import_exception(exception):
         micro_framework.exceptions,
         lambda x: inspect.isclass(x) and issubclass(x, Exception)
     ))
+
+    args = exception.get("args", (exception.get("message"), ))
+    kwargs = exception.get("kwargs", {})
+
     if exception['exception'] in __builtins__:
-        return __builtins__[exception['exception']](exception['message'])
+        return __builtins__[exception['exception']](*args, **kwargs)
     elif exception["exception"] in fw_exceptions:
-        return fw_exceptions[exception["exception"]](exception.get("message"))
+        return fw_exceptions[exception["exception"]](*args, **kwargs)
+
     try:
         module = importlib.import_module(exception["module"])
-        exc = getattr(module, exception["exception"])
-        if hasattr(exc, "__setstate__") and exception.get("state"):
-            exc = exc()
-            exc.__setstate__(exception.get("state"))
-            return exc
-        return exc(exception["message"])
+        return getattr(module, exception["exception"])(*args, **kwargs)
     except (ModuleNotFoundError, ImportError, AttributeError, KeyError):
         return RPCException(exception)
 
@@ -55,11 +55,14 @@ def format_rpc_response(data, exception=None):
     """
     exception_data = None
     if exception:
-        state = exception.__getstate__() if hasattr(exception, "__getstate__") else None
+        args = exception.__getargs__() if hasattr(exception, "__getargs__") else exception.args
+        kwargs = exception.__getkwargs__() if hasattr(exception, "__getkwargs__") else {}
+        if kwargs is None: kwargs = {}
         exception_data = {
             'exception': type(exception).__name__,
             'message': str(exception),
-            'state': state,
+            'args': args,
+            "kwargs": kwargs,
             'module': exception.__module__,
         }
     return json.dumps({

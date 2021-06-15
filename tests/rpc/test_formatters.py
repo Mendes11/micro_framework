@@ -5,22 +5,24 @@ from micro_framework.exceptions import MaxConnectionsReached, RPCException
 class MockException(Exception):
     pass
 
+
 class MockExceptionWithArgs(Exception):
-    def __init__(self, arg1=None, arg2=None):
+    def __init__(self, message, arg2=None):
+        self.arg2 = arg2
+        super(MockExceptionWithArgs, self).__init__(message)
+
+
+class MockExceptionWithGetKwargs(Exception):
+    def __init__(self, message, arg1, arg2=None):
         self.arg1 = arg1
         self.arg2 = arg2
-        super(MockExceptionWithArgs, self).__init__(arg1)
+        super(MockExceptionWithGetKwargs, self).__init__(message)
 
-class MockExceptionWithState(MockExceptionWithArgs):
-    def __getstate__(self):
-        return {"arg1": self.arg1, "arg2": self.arg2}
+    def __getkwargs__(self):
+        return {"arg2": self.arg2}
 
-    def __setstate__(self, state):
-        self.arg1 = state.get("arg1")
-        self.arg2 = state.get("arg2")
-
-    def __str__(self):
-        return f"{self.arg1}, {self.arg2}"
+    def __getargs__(self):
+        return (self.args[0], self.arg1)
 
 
 def test_import_exception_builtin():
@@ -51,46 +53,50 @@ def test_import_exception_custom():
     assert str(exc) == "Some Message"
 
 
-def test_import_exception_custom_no_state():
+def test_import_exception_custom_no_args():
     exc = import_exception({
         "exception": "MockExceptionWithArgs",
         "message": "Some Message",
-        "module": MockException.__module__
+        "module": MockException.__module__,
     })
     assert type(exc) == MockExceptionWithArgs
-    assert exc.arg1 == "Some Message"
+    assert exc.args == ("Some Message", )
     assert exc.arg2 is None
     assert str(exc) == "Some Message"
 
-def test_import_exception_with_setstate():
+def test_import_exception_with_args():
     exc = import_exception({
-        "exception": "MockExceptionWithState",
-        "message": "1",
-        "module": MockException.__module__,
-        "state": {"arg1": 1, "arg2": 2}
-    })
-    assert type(exc) == MockExceptionWithState
-    assert exc.arg1 == 1
-    assert exc.arg2 == 2
-    assert str(exc) == "1, 2"
-
-def test_import_exception_no_state_given():
-    exc = import_exception({
-        "exception": "MockExceptionWithState",
+        "exception": "MockExceptionWithArgs",
         "message": "Test",
         "module": MockException.__module__,
+        "args": ["Test"]
     })
-    assert type(exc) == MockExceptionWithState
-    assert exc.arg1 == "Test"
-    assert exc.arg2 is None
-    assert str(exc) == "Test, None"
+    assert type(exc) == MockExceptionWithArgs
+    assert exc.args == ("Test", )
+    assert exc.arg2 == None
+    assert str(exc) == "Test"
+
+
+def test_import_exception_with_kwargs():
+    exc = import_exception({
+        "exception": "MockExceptionWithArgs",
+        "message": "Test",
+        "module": MockException.__module__,
+        "args": ["Test", ],
+        "kwargs": {"arg2": "Test2"}
+    })
+    assert type(exc) == MockExceptionWithArgs
+    assert exc.args == ("Test", )
+    assert exc.arg2 == "Test2"
+    assert str(exc) == "Test"
+
 
 def test_import_exception_no_module_found():
     exc = import_exception({
         "exception": "ServerSpecificException",
         "message": "Some Message",
         "module": "inexistent.module",
-        "state": {"arg1": "Not used"}
+        "args": ["Not Used", ]
     })
     assert type(exc) == RPCException
     assert str(exc) == "ServerSpecificException Some Message"
@@ -107,28 +113,31 @@ def test_format_rpc_response_normal_data():
    '}')
 
 
-def test_format_rpc_response_with_exception_no_getstate():
-    exc = MockExceptionWithArgs("test", "test2")
+def test_format_rpc_response_with_exception_no_getkwargs():
+    exc = MockExceptionWithArgs("test", arg2="test2")
     ret = format_rpc_response(None, exception=exc)
     assert ret == ('{'
       '"data": null, '
       '"exception": {'
         '"exception": "MockExceptionWithArgs", '
-        '"message": "test", "state": null, '
+        '"message": "test", '
+        '"args": ["test"], '
+        '"kwargs": {}, '
         '"module": "tests.rpc.test_formatters"'
        '}'
    '}')
 
 
-def test_format_rpc_response_with_exception_with_getstate():
-    exc = MockExceptionWithState("test", "test2")
+def test_format_rpc_response_with_exception_with_getkwargs():
+    exc = MockExceptionWithGetKwargs("test", "arg1", "test2")
     ret = format_rpc_response(None, exception=exc)
     assert ret == ('{'
       '"data": null, '
       '"exception": {'
-        '"exception": "MockExceptionWithState", '
-        '"message": "test, test2", '
-        '"state": {"arg1": "test", "arg2": "test2"}, '
+        '"exception": "MockExceptionWithGetKwargs", '
+        '"message": "test", '
+        '"args": ["test", "arg1"], '
+        '"kwargs": {"arg2": "test2"}, '
         '"module": "tests.rpc.test_formatters"'
        '}'
    '}')
@@ -149,11 +158,12 @@ def test_parse_rpc_response_with_exception():
     msg = ('{'
       '"data": null, '
       '"exception": {'
-        '"exception": "MockExceptionWithState", '
+        '"exception": "MockExceptionWithGetKwargs", '
         '"message": "test, test2", '
-        '"state": {"arg1": "test", "arg2": "test2"}, '
+        '"args": ["test", "arg1"], '
+        '"kwargs": {"arg2": "test2"}, '
         '"module": "tests.rpc.test_formatters"'
        '}'
    '}')
     res = parse_rpc_response(msg)
-    assert type(res) == MockExceptionWithState
+    assert type(res) == MockExceptionWithGetKwargs
