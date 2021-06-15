@@ -103,7 +103,7 @@ async def test_bind_extension_registered(runner_context_factory):
     ext = ParentExt()
     new_ext = ext.bind(context)
 
-    assert context.extra_extensions == {new_ext.inner_ext, new_ext}
+    assert context.extra_extensions == [new_ext.inner_ext, new_ext]
 
 
 async def test_bind_context_singleton(runner_context_factory):
