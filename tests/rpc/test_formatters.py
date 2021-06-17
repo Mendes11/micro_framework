@@ -143,6 +143,21 @@ def test_format_rpc_response_with_exception_with_getkwargs():
    '}')
 
 
+def test_format_rpc_response_builting_exception():
+    exc = ValueError("test")
+    ret = format_rpc_response(None, exception=exc)
+    assert ret == ('{'
+       '"data": null, '
+       '"exception": {'
+       '"exception": "ValueError", '
+       '"message": "test", '
+       '"args": ["test"], '
+       '"kwargs": {}, '
+       '"module": null'
+       '}'
+    '}')
+
+
 def test_parse_rpc_response():
     msg = ('{'
         '"data": {'

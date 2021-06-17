@@ -58,13 +58,19 @@ def format_rpc_response(data, exception=None):
         args = exception.__getargs__() if hasattr(exception, "__getargs__") else exception.args
         kwargs = exception.__getkwargs__() if hasattr(exception, "__getkwargs__") else {}
         if kwargs is None: kwargs = {}
+        try:
+            module = exception.__module__
+        except:
+            module = None
+
         exception_data = {
             'exception': type(exception).__name__,
             'message': str(exception),
             'args': args,
             "kwargs": kwargs,
-            'module': exception.__module__,
+            'module': module,
         }
+
     return json.dumps({
         'data': data,
         'exception': exception_data
