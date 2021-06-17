@@ -23,7 +23,7 @@ def import_exception(exception):
     try:
         module = importlib.import_module(exception["module"])
         return getattr(module, exception["exception"])(*args, **kwargs)
-    except (ModuleNotFoundError, ImportError, AttributeError, KeyError):
+    except Exception:
         return RPCException(exception)
 
 
