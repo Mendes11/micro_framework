@@ -164,7 +164,9 @@ class BackOff(Extension):
 
     async def _retry_count_is_lower(self, context):
         retry_count = context['retry_count']
-        if retry_count < await self.get_max_retries(context):
+        max_retries = await self.get_max_retries(context)
+
+        if max_retries == 0 or retry_count < max_retries:
             return True
         return False
 
