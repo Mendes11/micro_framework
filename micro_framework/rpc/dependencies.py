@@ -1,6 +1,6 @@
 import json
 
-from micro_framework.dependencies import Dependency, RunnerDependency
+from micro_framework.dependencies import RunnerDependency
 from micro_framework.rpc.connectors import RPCConnector
 from .formatters import format_rpc_command
 from .proxies import RPCProxy
