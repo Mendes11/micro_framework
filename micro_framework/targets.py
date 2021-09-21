@@ -1,10 +1,9 @@
 import asyncio
 import inspect
-from functools import partial
 from typing import Union, Callable, Dict
 
-from micro_framework.dependencies import Dependency, RunnerDependency
 from micro_framework.extensions import Extension
+from micro_framework.utils import is_runner_dependency, is_dependency
 
 
 async def call_dependencies(
@@ -22,11 +21,14 @@ async def call_dependencies(
 
 
 class AsyncTargetExecutor:
-    def __init__(self, config, target, dependencies, runner_dependencies):
+    def __init__(
+            self, config, target, dependencies, runner_dependencies, metadata
+    ):
         self._config = config
         self.dependencies = dependencies
         self.runner_dependencies = runner_dependencies or {}
         self.target = target
+        self._meta = metadata
 
     async def pre_call(self):
         await call_dependencies(
@@ -112,10 +114,10 @@ class TargetExecutor(AsyncTargetExecutor):
 class ClassExecutorMixin:
     def __init__(self, config, class_instance, target_method,
                  class_dependencies, target_runner_dependencies,
-                 target_dependencies):
+                 target_dependencies, metadata):
         super(ClassExecutorMixin, self).__init__(
             config, target_method, target_runner_dependencies,
-            target_dependencies
+            target_dependencies, metadata
         )
         self.class_instance = class_instance
         self.class_dependencies = class_dependencies
@@ -175,7 +177,7 @@ class Target(Extension):
         self._dependencies = {}
         self._runner_dependencies = {}
         for name, dependency in self.all_dependencies.items():
-            if isinstance(dependency, RunnerDependency):
+            if is_runner_dependency(dependency):
                 # RunnerDependencies are handled outside the worker.
                 self._runner_dependencies[name] = dependency
             else:
@@ -212,7 +214,8 @@ class Target(Extension):
         target_executor_class = self.get_target_executor_class()
         executor_instance = target_executor_class(
             self.runner.config, self.target,
-            self._dependencies, dependencies
+            self._dependencies, dependencies,
+            worker._meta
         )
         return executor_instance
 
@@ -324,11 +327,11 @@ class TargetClassMethod(Target):
 
     def populate_class_dependencies(self):
         dependencies = inspect.getmembers(
-            self.target_class, lambda x: isinstance(x, Dependency)
+            self.target_class, lambda x: is_dependency(x)
         )
         self._class_dependencies = {}
         for name, dependency in dependencies:
-            if isinstance(dependency, RunnerDependency):
+            if is_runner_dependency(dependency):
                 self._class_runner_dependencies[name] = dependency
             else:
                 self._class_dependencies[name] = dependency
@@ -365,7 +368,7 @@ class TargetClassMethod(Target):
         return target_executor_class(
             self.runner.config, cls, getattr(cls, self.target_method),
             self._class_dependencies, dependencies,
-            self._dependencies
+            self._dependencies, worker._meta
         )
 
     async def on_worker_finished(self, worker):
@@ -419,3 +422,11 @@ def new_target(target: Callable, method_name=None) -> Union[
         return TargetClassMethod(target, method_name)
 
     return TargetFunction(target)
+
+
+# Type Reference for all possible Executors.
+# Used by Dependency Extension to reference all possible "worker" types there
+ExecutorsType = Union[
+    ClassTargetExecutor, AsyncClassTargetExecutor,
+    TargetExecutor, AsyncTargetExecutor
+]
