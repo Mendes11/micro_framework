@@ -2,11 +2,15 @@ import inspect
 import sys
 
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 from micro_framework.extensions import Extension
 
 from micro_framework.workers import Worker
+
+if TYPE_CHECKING: # Way to handle circular import
+    from micro_framework.targets import ExecutorsType
+
 
 def inject(**dependencies):
     for dep in dependencies.values():
@@ -32,7 +36,7 @@ def inject(**dependencies):
 
 class Dependency(Extension):
     """
-    Kind of extension that injects a dependency into the worker target.
+    Kind of extension that injects a dependency into the executor target.
 
     The Dependency instance will be used by multiple workers so it is not
     recommended to store states to be used between the methods calls unless
@@ -79,19 +83,19 @@ class Dependency(Extension):
         ext.config = runner.config
         return ext
 
-    async def setup_dependency(self, worker: Worker):
+    async def setup_dependency(self, worker: 'ExecutorsType'):
         """
         Do any setup necessary before the dependency injection.
         """
         pass
 
-    async def get_dependency(self, worker: Worker) -> Callable:
+    async def get_dependency(self, worker: 'ExecutorsType') -> Callable:
         """
         Injects the dependency that will be passed to the Target Function.
         """
         pass
 
-    async def after_call(self, worker: Worker, result: Any, exc: Exception):
+    async def after_call(self, worker: 'ExecutorsType', result: Any, exc: Exception):
         """
         Cleanup after the function has finished or raised.
         """
@@ -182,5 +186,5 @@ class Config(Dependency):
     """
     Returns the Runner Configuration.
     """
-    async def get_dependency(self, worker: Worker):
+    async def get_dependency(self, worker: 'ExecutorsType'):
         return self.config

@@ -1,10 +1,10 @@
 import asyncio
 import logging
 from datetime import datetime
+from typing import Union, Callable
 
 from kombu import Exchange, Queue
 
-from micro_framework.amqp.connectors import PublisherClient
 from micro_framework.amqp.dependencies import dispatch
 from micro_framework.amqp.entrypoints import BaseEventListener
 from micro_framework.dependencies import Dependency
@@ -30,12 +30,57 @@ class BackOffData(Dependency):
     worker and passes it to the user as a BackOffContext object.
     """
 
-    def get_dependency(self, worker):
+    async def get_dependency(self, worker):
         backoff_meta = worker._meta.get('backoff', {})
         return BackOffContext(
             retry_count=backoff_meta.get('retry_count', 0),
             last_retry=backoff_meta.get('last_retry', None)
         )
+
+
+class ConstantIntervalProvider:
+    def __init__(self, interval: int):
+        self.interval = interval
+
+    def __call__(self, backoff: 'BackOff', context: BackOffContext) -> int:
+        """
+        Returns the interval that should be awaited until calling the target
+        again.
+        :param backoff: Backoff class that called this class
+        :param context:
+        :return: The interval to wait
+        :rtype: int
+        """
+        return self.interval
+
+
+class LinearIntervalProvider:
+    def __init__(self, starting_interval: int, increment: int,
+                 max_interval: int = None):
+        self.interval = starting_interval
+        self.increment = increment
+        self.max_interval = max_interval
+
+    def __call__(self, backoff: 'BackOff', context: BackOffContext) -> int:
+        """
+        Returns the interval as a linear function of the number of retries:
+
+        i = start_interval + n * increment
+
+        where, 'n' is the number of retries
+
+        Also, if 'max_interval' is given, we limit all values above it to
+        the max_interval value.
+
+        :param backoff: Backoff class that called this class
+        :param context:
+        :return: The interval to wait
+        :rtype: int
+        """
+        interval = self.interval + context.retry_count * self.increment
+        if self.max_interval is not None and interval > self.max_interval:
+            interval = self.max_interval
+        return interval
 
 
 class BackOff(Extension):
@@ -44,16 +89,34 @@ class BackOff(Extension):
     retries when needed.
     """
 
-    def __init__(self, max_retries=3, interval=60000, exception_list=None):
+    def __init__(
+        self,
+        max_retries: int = 3,
+        interval: Union[int, Callable[['BackOff', BackOffContext], int]] = 60000,
+        exception_list=None,
+        *args, **kwargs
+    ):
         """
+        Backoff Class handles the logic behind when to tell the framework
+        that it should retry and then actually execute/schedule the retry.
+
+
+
         :param int max_retries: Total number of retry attempts.
-        :param interval: Interval between retries in micro seconds
+
+        :param Callable interval: Interval between retries in micro seconds.
+        It accepts either an int or a callable that receives :class:BackOff and :class:BackOffContext arguments
+        and expects an int as the return.
+
         :param exception_list: list of exceptions that enable retries.
         """
         self.max_retries = max_retries
-        self.interval = interval  # Microseconds
+        if isinstance(interval, int):
+            interval = ConstantIntervalProvider(interval)
+        self.interval_provider = interval
         self.exception_list = exception_list
         self.route = None
+        super(BackOff, self).__init__(*args, **kwargs)
 
     async def get_interval(self, context):
         """
@@ -67,7 +130,11 @@ class BackOff(Extension):
         :param dict context: BackOff meta data
         :return int: Interval in milliseconds.
         """
-        return self.interval
+
+        context = BackOffContext(
+            context.get("retry_count"), context.get("last_retry")
+        )
+        return self.interval_provider(self, context)
 
     async def get_max_retries(self, context):
         """
@@ -168,11 +235,14 @@ class BackOff(Extension):
         updated_context = await self.update_context(context)
         meta['backoff'] = updated_context
         worker._meta = meta  # meta might be a reference so this is ambiguous
-        logger.info(f"{worker.target} failed, sending retry action.")
+        logger.info(
+            f"{worker.target} failed, sending retry action to wait for "
+            f"{next_interval} microseconds."
+        )
         return await self.execute_retry(worker, next_interval)
 
-    async def bind(self, runner, parent=None):
-        ext = await super(BackOff, self).bind(runner, parent=parent)
+    def bind(self, runner, parent=None):
+        ext = super(BackOff, self).bind(runner, parent=parent)
         if not isinstance(parent, Route):
             raise TypeError("A BackOff class can only be used inside a Route.")
         ext.route = parent
@@ -213,12 +283,6 @@ class AsyncBackOff(BackOff, BaseEventListener):
         )
         return None
 
-    async def bind_route(self, route):
-        self.route = route._clone()
-        self.route._entrypoint = self
-        await self.route.bind(self.runner)
-        await self.route.entrypoint.bind_to_route(self.route)
-
     async def get_event_name(self):
         return f"{self.route.target}_backoff"
 
@@ -242,9 +306,10 @@ class AsyncBackOff(BackOff, BaseEventListener):
             exchange=exchange, routing_key=event_name
         )
 
-    async def new_entry(self, message, payload):
+    async def call_route(self, entry_id, *args, _meta=None, **kwargs):
         # Converting the BackOff payload to the original payload and adding a
-        # BackOff Context to it as kwargs
+        # BackOff Context to it as metadata
+        payload = args[0]
         fn_args = payload['fn_args']
         fn_kwargs = payload['fn_kwargs']
         _meta = payload['_meta']
@@ -253,7 +318,9 @@ class AsyncBackOff(BackOff, BaseEventListener):
         logger.info(
             f"{self.route.target} retry {retry_count} of {max_retries}"
         )
-        await self.call_route(message, *fn_args, _meta=_meta, **fn_kwargs)
+        return await super(AsyncBackOff, self).call_route(
+            entry_id, *fn_args, _meta=_meta, **fn_kwargs
+        )
 
     @property
     def service_name(self):
