@@ -5,7 +5,7 @@ importlib-metadata==4.8.1
 iniconfig==1.1.1
 kombu==4.6.11
 loky==2.9.0
--e git+ssh://git@github.com/Mendes11/micro_framework.git@34fa262e9d56de4e5689c9c912f4758ff39b4070#egg=micro_framework
+mock==4.0.3
 packaging==21.0
 pluggy==1.0.0
 prometheus-client==0.8.0
