@@ -9,53 +9,16 @@ from ..entrypoints import Entrypoint
 
 logger = logging.getLogger(__name__)
 
-async def target_detail(entrypoint: Entrypoint):
-    """
-    Return the Details of an entrypoint's target.
-    :param Entrypoint entrypoint: Entrypoint
-    :return dict: Entrpoint Details dict.
-    """
-    target = entrypoint.route.target
-    target_id = str(target)
-
-    target_parameters = target.parameters
-
-    args = [
-        name for name, parameter in target_parameters.items() if
-        parameter.kind in [
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.VAR_POSITIONAL
-        ] and parameter.default is inspect._empty  # arguments with
-        # default are considered POSITIONAL_OR_KEYWORD. So here I'll
-        # filter only those that don't have a default value.
-    ]
-    kwargs = [
-        name for name, parameter in target_parameters.items() if
-        parameter.kind in [
-            inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.VAR_KEYWORD,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD
-        ] and (parameter.default is not inspect._empty or
-               parameter.kind is inspect.Parameter.VAR_KEYWORD)
-    ]
-    return {
-        'target': target_id,
-        'args': args,
-        'kwargs': kwargs,
-        'docstring': inspect.getdoc(target)
-    }
-
-
 class RPCRegister:
     def __init__(self):
         self._targets = {}
 
-    async def add_entrypoint(self, entrypoint):
-        target = await target_detail(entrypoint)
+    async def add_entrypoint(self, entrypoint: Entrypoint):
+        target = await entrypoint.route.target.target_detail()
         self._targets[target["target"]] = entrypoint
 
     async def remove_entrypoint(self, entrypoint):
-        target = await target_detail(entrypoint)
+        target = await entrypoint.route.target.target_detail()
         self._targets.pop(target["target"], None)
 
     @property
@@ -75,7 +38,8 @@ class RPCManagerMixin(Extension):
 
     {
         "command": str,
-        "command_args": list
+        "command_args": list,
+        "command_kwargs": dict,
     }
 
 
@@ -108,7 +72,7 @@ class RPCManagerMixin(Extension):
 
     async def add_entrypoint(self, entrypoint):
         await self.register.add_entrypoint(entrypoint)
-        detail = await target_detail(entrypoint)
+        detail = await entrypoint.route.target.target_detail()
         target_id = detail['target']
         if target_id in self.entrypoints:
             raise ValueError(
@@ -174,7 +138,7 @@ class RPCManagerMixin(Extension):
         :return list, Optional[Exception]: All available Entrypoints's target
         """
         return [
-                   await target_detail(entrypoint)
+                   await entrypoint.route.target.target_detail()
                    for entrypoint in self.register.entrypoints
                ], None
 
@@ -185,7 +149,8 @@ class RPCManagerMixin(Extension):
         :param target: target rpc identification
         :return dict, Optional[Exception]: Target detail
         """
-        return await target_detail(self.register.targets[target]), None
+        entrypoint = self.register.targets[target]
+        return await entrypoint.route.target.target_detail(), None
 
     async def __call_target__(self, client, target, *args, **kwargs):
         """
