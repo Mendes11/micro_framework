@@ -43,7 +43,7 @@ class RPCClient:
             future.set_result(res)
 
         t = Thread(
-            call, args=(future, self.make_call, message, wait_response),
+            target=call, args=(future, self.make_call, message, wait_response),
             daemon=True
         )
         t.start()

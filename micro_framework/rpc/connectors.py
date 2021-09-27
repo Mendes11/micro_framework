@@ -17,7 +17,7 @@ class RPCConnection(ABC):
         ...
 
     @abstractmethod
-    def send_and_receive(self, message: Union[str, bytes]):
+    def send_and_receive(self, message: Union[str, bytes]) -> Union[str, bytes]:
         """
         Send a message and wait for the connected server response.
         """

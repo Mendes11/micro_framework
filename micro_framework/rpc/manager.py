@@ -1,11 +1,10 @@
-import inspect
 import json
 import logging
 
-from micro_framework.exceptions import RPCTargetDoesNotExist
+from micro_framework.exceptions import RPCTargetDoesNotExist, \
+    RPCMalformedMessage
 from micro_framework.extensions import Extension
 from .formatters import format_rpc_response
-from ..entrypoints import Entrypoint
 
 logger = logging.getLogger(__name__)
 
@@ -13,13 +12,16 @@ class RPCRegister:
     def __init__(self):
         self._targets = {}
 
-    async def add_entrypoint(self, entrypoint: Entrypoint):
+    async def add_entrypoint(self, entrypoint):
         target = await entrypoint.route.target.target_detail()
         self._targets[target["target"]] = entrypoint
 
     async def remove_entrypoint(self, entrypoint):
         target = await entrypoint.route.target.target_detail()
         self._targets.pop(target["target"], None)
+
+    async def clear(self):
+        self._targets = {}
 
     @property
     def entrypoints(self):
@@ -30,7 +32,7 @@ class RPCRegister:
         return self._targets
 
 
-class RPCManagerMixin(Extension):
+class RPCManager(Extension):
     """
     Manages RPC messages to call Entrypoints
 
@@ -63,7 +65,7 @@ class RPCManagerMixin(Extension):
     """
 
     def __init__(self):
-        super(RPCManagerMixin, self).__init__()
+        super(RPCManager, self).__init__()
         self.entrypoints = {}
 
     context_singleton = True
@@ -106,12 +108,11 @@ class RPCManagerMixin(Extension):
             try:
                 message = json.loads(message)
             except json.JSONDecodeError as exc:
-                logger.error(
-                    "RPCManager received unknown message structure: {}".format(
+                msg = "RPCManager received unknown message structure: {}".format(
                         message
                     )
-                )
-                return format_rpc_response(None, exc)
+                logger.error(msg)
+                return format_rpc_response(None, RPCMalformedMessage(msg))
 
         command = message['command']
         command_args = message.get('command_args', [])
