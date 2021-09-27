@@ -1,0 +1,9 @@
+[run]
+source=.
+omit =
+    */conftest.py
+    */__init__.py
+    */tests/*
+    venv/*
+    setup.py
+
