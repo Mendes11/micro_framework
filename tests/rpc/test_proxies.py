@@ -29,6 +29,7 @@ def client(mocker):
     return mocker.MagicMock()
 
 
+
 def test_rpc_system_service_proxy_created(service_factory):
     rpc = RPCSystem(service_factory)
 
@@ -64,7 +65,7 @@ def test_rpc_service_target_proxy_factory_called(
     rpc_target.target_id = "my_target"
     _ = service.my_target
 
-    target_factory.assert_called_with("my_target", service, None)
+    target_factory.assert_called_with("my_target", service, None, None)
 
 
 def test_rpc_service_target_proxy_multiple_calls(
@@ -91,8 +92,8 @@ def test_rpc_service_target_discovery(
 
     client.list_targets.assert_called_once()
     target_factory.assert_has_calls([
-        call("my_func", service, targets[0]),
-        call("MyClass.func2", service, targets[1]),
+        call("my_func", service, targets[0], None),
+        call("MyClass.func2", service, targets[1], None),
         ]
     )
 
@@ -126,29 +127,70 @@ def test_rpc_target_instantiated_not_nested(rpc_service):
 
 
 def test_rpc_target_instantiated_nested(rpc_service, mocker):
-    rpc_service._new_rpc_target.return_value = mocker.MagicMock(
-        target_id="my_func"
+    rpc_service._new_rpc_target.side_effect = (
+        lambda target_id, details, parent: RPCTarget(
+            target_id, rpc_service, details, parent=parent
+        )
     )
     target = RPCTarget("MyClass.my_func", rpc_service)
 
     assert target.target_id == "MyClass"
     assert hasattr(target, "my_func")
-    assert target.my_func.target_id == "my_func"
+    assert target.my_func.target_id == "MyClass.my_func"
     rpc_service._new_rpc_target.assert_called_with(
-        "my_func", None
+        "my_func", None, parent=target
     )
 
 def test_rpc_target_instantiated_nested_two_lvls(rpc_service, mocker):
     rpc_service._new_rpc_target.return_value = mocker.MagicMock(
-        target_id="my_func"
+        _target_id="my_func"
     )
     target = RPCTarget("MyClass.my_func.something", rpc_service)
 
     assert target.target_id == "MyClass"
     assert hasattr(target, "my_func")
     rpc_service._new_rpc_target.assert_called_with(
-        "my_func.something", None
+        "my_func.something", None, parent=target
     )
+
+def test_rpc_target_unknown_levels(rpc_service, mocker):
+    t1 = mocker.MagicMock(target_id="my_func")
+    rpc_service._new_rpc_target.return_value = t1
+    target = RPCTarget("MyClass", rpc_service)
+
+    assert target.target_id == "MyClass"
+
+    inner_target = target.my_func
+    assert inner_target == t1
+
+    rpc_service._new_rpc_target.assert_has_calls([
+        call("my_func", None, parent=target),
+    ])
+
+
+def test_rpc_target_nested_levels(rpc_service, mocker):
+    rpc_service._new_rpc_target.side_effect = (
+        lambda target_id, details, parent: RPCTarget(
+            target_id, rpc_service, details, parent=parent
+        )
+    )
+
+    target = RPCTarget("MyClass", rpc_service)
+
+    assert target.target_id == "MyClass"
+
+    inner_target = target.my_func
+    assert isinstance(inner_target, RPCTarget)
+
+    inner_target2 = inner_target.another_func
+    assert isinstance(inner_target2, RPCTarget)
+
+    rpc_service._new_rpc_target.assert_has_calls([
+        call("my_func", None, parent=target),
+        call("another_func", None, parent=inner_target)
+    ])
+    assert inner_target.target_id == "MyClass.my_func"
+    assert inner_target2.target_id == "MyClass.my_func.another_func"
 
 def test_rpc_target_with_details(rpc_service):
     details = {
@@ -166,8 +208,10 @@ def test_rpc_target_with_details(rpc_service):
 
 
 def test_rpc_target_with_details_nested(rpc_service, mocker):
-    rpc_service._new_rpc_target.return_value = mocker.MagicMock(
-        target_id="my_func"
+    rpc_service._new_rpc_target.side_effect = (
+        lambda target_id, details, parent: RPCTarget(
+            target_id, rpc_service, details, parent=parent
+        )
     )
     details = {
         "target": "MyClass.my_func", "args": ("arg1", "arg2"),
@@ -182,7 +226,7 @@ def test_rpc_target_with_details_nested(rpc_service, mocker):
     assert target.target_doc == None
 
     rpc_service._new_rpc_target.assert_called_with(
-        "my_func", details
+        "my_func", details, parent=target
     )
 
 
@@ -197,8 +241,7 @@ def test_rpc_target_call(rpc_service, client):
     t = target(1, 2, 3, 4, test="something")
     assert t == "result"
     client.call_target_async.assert_called_with(
-        '{"command": "my_func", "command_args": [1, 2, 3, 4], '
-        '"command_kwargs": {"test": "something"}}', _wait_response=True
+        "my_func", 1, 2, 3, 4, test="something", _wait_response=True
     )
 
 def test_rpc_target_call_async(rpc_service, client):
@@ -212,8 +255,7 @@ def test_rpc_target_call_async(rpc_service, client):
 
     t = target.call_async(1, 2, 3, 4, test="something")
     client.call_target_async.assert_called_with(
-        '{"command": "my_func", "command_args": [1, 2, 3, 4], '
-        '"command_kwargs": {"test": "something"}}', _wait_response=True
+        "my_func", 1, 2, 3, 4, test="something",  _wait_response=True
     )
     assert t == future
     assert t.result() == "result"
