@@ -413,7 +413,9 @@ def new_target(target: Callable, method_name=None) -> Union[
     to be called.
     :return Union[TargetFunction, TargetClassMethod]: The Instantiated Target.
     """
-    if inspect.isclass(target) and not method_name:
+    if isinstance(target, Target):
+        return target
+    elif inspect.isclass(target) and not method_name:
         method_name = "__call__"
     elif not inspect.isclass(target):
         method_name = None
