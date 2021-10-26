@@ -2,11 +2,11 @@ import uuid
 from contextlib import contextmanager
 
 import warnings
+
 from amqp import ChannelError
 from kombu import Queue, Exchange, Connection, producers
 
 from micro_framework.exceptions import RPCTargetDoesNotExist
-from micro_framework.rpc import RPCConnection
 from micro_framework.targets import Target
 
 rpc_exchange_name = "ufw-rpc"

@@ -83,11 +83,13 @@ RPC Target Object.
         return self.__repr__()
 
     def __getattr__(self, item):
-        nested_target = self._service._new_rpc_target(
-            item, None, parent=self
-        )
-        setattr(self, nested_target.target_id, nested_target)
-        return nested_target
+        if not item.startswith("__"):
+            nested_target = self._service._new_rpc_target(
+                item, None, parent=self
+            )
+            setattr(self, nested_target.target_id, nested_target)
+            return nested_target
+        raise AttributeError(item)
 
 
 class RPCService:
@@ -138,7 +140,9 @@ class RPCService:
             self._add_target(target["target"], target)
 
     def __getattr__(self, target_id):
-        return self._add_target(target_id)
+        if not target_id.startswith("__"):
+            return self._add_target(target_id)
+        raise AttributeError(target_id)
 
     @property
     def targets(self) -> Set[RPCTarget]:
@@ -170,7 +174,9 @@ class RPCSystem:
         self._service_proxies = {}
 
     def __getattr__(self, service_name):
-        if not service_name in self._service_proxies:
-            proxy = self.new_service_proxy(service_name)
-            self._service_proxies[service_name] = proxy
-        return self._service_proxies[service_name]
+        if not service_name.startswith("__"):
+            if not service_name in self._service_proxies:
+                proxy = self.new_service_proxy(service_name)
+                self._service_proxies[service_name] = proxy
+            return self._service_proxies[service_name]
+        raise AttributeError(service_name)
