@@ -111,7 +111,7 @@ class BackOff(Extension):
         :param exception_list: list of exceptions that enable retries.
         """
         self.max_retries = max_retries
-        if isinstance(interval, int):
+        if isinstance(interval, (int, float)):
             interval = ConstantIntervalProvider(interval)
         self.interval_provider = interval
         self.exception_list = exception_list

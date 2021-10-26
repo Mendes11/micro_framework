@@ -1,17 +1,19 @@
 class FrameworkException(Exception):
-    pass
+    ...
 
 
 class PoolStopped(Exception):
-    pass
+    ...
 
 class ExtensionIsStopped(FrameworkException):
-    pass
+    ...
 
 
 class RPCTargetDoesNotExist(FrameworkException):
-    pass
+    ...
 
+class RPCMalformedMessage(FrameworkException):
+    ...
 
 class RPCException(FrameworkException):
     def __init__(self, exception_dict):
@@ -25,7 +27,7 @@ class RPCException(FrameworkException):
 
 
 class MaxConnectionsReached(FrameworkException):
-    pass
+    ...
 
 
 class RPCAsyncResponse(FrameworkException):
