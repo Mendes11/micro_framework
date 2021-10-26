@@ -8,19 +8,20 @@ from micro_framework.rpc.client import RPCClient
 
 
 class RPCProviderMixin:
-    def new_connector(self) -> RPCConnector:
+    def new_connector(self, service_name: str) -> RPCConnector:
         return RPCConnector()
 
     def new_client(self, service_name: str) -> RPCClient:
-        return RPCClient(self.new_connector())
+        return RPCClient(self.new_connector(service_name))
 
     def new_rpc_target_proxy(
-            self, target_id: str, rpc_service, target_details
+            self, target_id: str, rpc_service, target_details, parent
     ) -> RPCTarget:
         return RPCTarget(
             target_id,
             rpc_service,
-            target_details=target_details
+            target_details=target_details,
+            parent=parent
         )
 
     def new_service_proxy(self, service_name: str) -> Type[RPCService]:

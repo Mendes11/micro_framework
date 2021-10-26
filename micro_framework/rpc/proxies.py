@@ -17,23 +17,26 @@ class RPCTarget:
             self,
             target_id: str,
             service: 'RPCService',
-            target_details: Dict = None
+            target_details: Dict = None,
+            parent: 'RPCTarget' = None,
     ):
         # Target ID may be given as the whole path and could have nested
         # content on it
         target_id, *nested = target_id.split(".", 1)
-        self.target_id = target_id
+
+        self._target_id = target_id
         self._service = service
         self.target_args = None
         self.target_kwargs = None
         self.target_doc = None
+        self._parent = parent
 
         if nested:
             # create and add the nested target
             nested_target = self._service._new_rpc_target(
-                nested[0], target_details
+                nested[0], target_details, parent=self
             )
-            setattr(self, nested_target.target_id, nested_target)
+            setattr(self, nested_target._target_id, nested_target)
 
         elif target_details:
             self.target_args = target_details.get("args")
@@ -48,10 +51,8 @@ class RPCTarget:
 
         :return Future: Future object with result
         """
-
-        message = format_rpc_command(self.target_id, *args, **kwargs)
         return self._service._client.call_target_async(
-            message, _wait_response=True
+            self.target_id, *args, _wait_response=True, **kwargs
         )
 
     @property
@@ -64,6 +65,13 @@ RPC Target Object.
 > Target's Docstring: \n{self.target_doc}
         """
 
+    @property
+    def target_id(self):
+        if self._parent:
+            parent_path = self._parent.target_id
+            return "{}.{}".format(parent_path, self._target_id)
+        return self._target_id
+
     def __call__(self, *args, **kwargs) -> Any:
         future = self.call_async(*args, **kwargs)
         return future.result()
@@ -73,6 +81,13 @@ RPC Target Object.
 
     def __str__(self):
         return self.__repr__()
+
+    def __getattr__(self, item):
+        nested_target = self._service._new_rpc_target(
+            item, None, parent=self
+        )
+        setattr(self, nested_target.target_id, nested_target)
+        return nested_target
 
 
 class RPCService:
@@ -88,7 +103,8 @@ class RPCService:
     Targets can be either a Class, a Function or a Method of a class
 
     On instantiation a rpc_target_factory callable must be given. It should
-    expect a target_id string and optionally the target details as a dict.
+    expect a target_id string and optionally the target details as a dict
+    and a parent RPCTarget (for nested targets such as class -> method).
 
     If no target detail is given (None Type) then it is probably a target
     called without prior information (through getattr).
@@ -99,7 +115,7 @@ class RPCService:
             self,
             service_name: str,
             rpc_target_factory: Callable[
-                [str, 'RPCService', Optional[Dict]], 'RPCTarget'],
+                [str, 'RPCService', Optional[Dict], Optional[RPCTarget]], 'RPCTarget'],
             client: RPCClient
     ):
         self._targets = set()
@@ -107,11 +123,11 @@ class RPCService:
         self._target_factory = rpc_target_factory
         self._client = client
 
-    def _new_rpc_target(self, target_id, target_details):
-        return self._target_factory(target_id, self, target_details)
+    def _new_rpc_target(self, target_id, target_details, parent):
+        return self._target_factory(target_id, self, target_details, parent)
 
     def _add_target(self, target_id, target_details: dict = None) -> RPCTarget:
-        obj = self._new_rpc_target(target_id, target_details)
+        obj = self._new_rpc_target(target_id, target_details, None)
         setattr(self, obj.target_id, obj)
         self._targets.add(obj)
         return obj
@@ -149,10 +165,8 @@ class RPCSystem:
     def __init__(
             self,
             service_proxy_factory: Callable[[str], Type[RPCService]],
-            # client_factory: Callable[[str], RPCClient]
     ):
         self.new_service_proxy = service_proxy_factory
-        # self.client_factory = client_factory
         self._service_proxies = {}
 
     def __getattr__(self, service_name):

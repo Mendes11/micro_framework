@@ -79,7 +79,8 @@ class RPCManager(Extension):
         if target_id in self.entrypoints:
             raise ValueError(
                 f"Entrypoint {entrypoint} is already registered. "
-                f"You cannot have multiple entrypoints to the same target"
+                f"You cannot have multiple RPC entrypoints to the same "
+                f"target."
             )
         self.entrypoints[target_id] = entrypoint
 

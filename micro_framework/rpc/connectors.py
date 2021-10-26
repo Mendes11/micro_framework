@@ -10,14 +10,16 @@ class RPCConnection(ABC):
     """
 
     @abstractmethod
-    def send(self, message: Union[str, bytes]):
+    def send(self, message: Union[str, bytes], **kwargs):
         """
         Send a message without waiting for an answer.
         """
         ...
 
     @abstractmethod
-    def send_and_receive(self, message: Union[str, bytes]) -> Union[str, bytes]:
+    def send_and_receive(
+            self, message: Union[str, bytes], **kwargs
+    ) -> Union[str, bytes]:
         """
         Send a message and wait for the connected server response.
         """
