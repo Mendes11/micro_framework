@@ -1,14 +1,15 @@
 import importlib
 import inspect
 import json
+from typing import Union, Any
 
-import micro_framework
+from micro_framework import exceptions
 from micro_framework.exceptions import RPCException
 
 
 def import_exception(exception):
     fw_exceptions = dict(inspect.getmembers(
-        micro_framework.exceptions,
+        exceptions,
         lambda x: inspect.isclass(x) and issubclass(x, Exception)
     ))
 
@@ -77,13 +78,13 @@ def format_rpc_response(data, exception=None):
     })
 
 
-def parse_rpc_response(message):
+def parse_rpc_response(message: Union[str, bytes]) -> Union[Any, Exception]:
     """
     Reads a response returned by the RPC Manager.
     It returns either a loaded JSON or an exception if the exception key is
     not None.
 
-    :param str message: JSON Response
+    :param str|bytes message: JSON Response
     :return dict|list|Exception: Loaded RPC Response.
     """
     response = json.loads(message)

@@ -1,9 +1,9 @@
-from micro_framework.rpc.dependencies import RPCDependency
+from micro_framework.rpc import RPCServiceProvider
 from micro_framework.websocket.connectors import WebSocketConnector
 from micro_framework.websocket.rpc import WSRPCProxy
 
 
-class WebSocketRPCClient(RPCDependency):
+class WebSocketRPCClient(RPCServiceProvider):
     connector_class = WebSocketConnector
     proxy_class = WSRPCProxy
 
@@ -11,6 +11,9 @@ class WebSocketRPCClient(RPCDependency):
         self.address = address
         self.port = port
         self.timeout = timeout
+
+        service_name = f"{address}:{port}"
+        super(WebSocketRPCClient, self).__init__(service_name)
 
     def get_connector_kwargs(self):
         return {

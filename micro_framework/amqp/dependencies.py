@@ -8,7 +8,7 @@ from micro_framework.amqp.amqp_elements import get_connection, Publisher
 from micro_framework.amqp.connectors import AMQPRPCConnector
 from micro_framework.amqp.rpc import RPCReplyListener
 from micro_framework.dependencies import Dependency, RunnerDependency
-from micro_framework.rpc import RPCDependency
+from micro_framework.rpc import RPCServiceProvider, RPCProvider
 
 logger = logging.getLogger(__name__)
 
@@ -52,25 +52,29 @@ class Producer(Dependency):
         return dispatch_event
 
 
-class RPCProxyProvider(RPCDependency):
-    """
-    Provides a RPCProxy with AMQPRPCConnector.
-    """
-
-    def __init__(self, target_service):
-        self.target_service = target_service
-        super(RPCProxyProvider, self).__init__()
-
+class RPCProviderMixin:
     reply_listener = RPCReplyListener()
-    connector_class = AMQPRPCConnector
 
-    def get_connector_kwargs(self) -> Dict:
-        return {
-            "amqp_uri": self.config.get("AMQP_URI"),
-            "target_service": self.target_service,
-            "reply_listener": self.reply_listener.picklable_listener,
-        }
+    def new_connector(self, service_name: str) -> AMQPRPCConnector:
+        return AMQPRPCConnector(
+            self.config.get("AMQP_URI"),
+            target_service=service_name,
+            reply_listener=self.reply_listener.picklable_listener
+        )
 
+
+class RPCProxyProvider(RPCProviderMixin, RPCServiceProvider):
+    """
+    Provides a RPCServiceProxy with AMQPRPCConnector class handling the
+    communication through AMQP Protocol.
+    """
+
+
+class RPCSystemProxyProvider(RPCProviderMixin, RPCProvider):
+    """
+    Provides RPCProxy instance with AMQPRPCConnector class handling the
+    communication through AMQP Protocol.
+    """
 
 def dispatch(amqp_uri, exchange, routing_key, payload, amqp_heartbeat=None,
              **kwargs):

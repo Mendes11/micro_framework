@@ -1,4 +1,3 @@
-# TODO get configurations somehow
 import asyncio
 import inspect
 import logging.config
@@ -19,7 +18,6 @@ from micro_framework.metrics import PrometheusMetricServer, tasks_counter, \
     available_workers
 from micro_framework.routes import Route
 from micro_framework.spawners import SPAWNERS
-from micro_framework.spawners.thread import ThreadSpawner
 
 
 
@@ -416,7 +414,7 @@ class Runner:
         except (KeyboardInterrupt, asyncio.CancelledError):
             self.event_loop.run_until_complete(self._stop())
         except Exception:
-            self.event_loop.run_until_complete(self._stop())
+            self.event_loop.run_until_complete(self._stop(wait=False))
             raise
 
 

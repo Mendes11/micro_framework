@@ -5,9 +5,8 @@ from kombu import Exchange, Queue
 
 from micro_framework.amqp.amqp_elements import event_queue_name, \
     event_exchange_name
-from micro_framework.amqp.manager import ConsumerManager, RPCManager
+from micro_framework.amqp.manager import ConsumerManager, AMQPRPCManager
 from micro_framework.entrypoints import Entrypoint
-from micro_framework.rpc.manager import target_detail
 
 logger = getLogger(__name__)
 
@@ -108,7 +107,7 @@ class EventListener(QueueListener):
 
 
 class RPCListener(Entrypoint):
-    manager = RPCManager()
+    manager = AMQPRPCManager()
 
     async def setup(self):
         await super(RPCListener, self).setup()

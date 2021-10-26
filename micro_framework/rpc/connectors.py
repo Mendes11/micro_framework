@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 
 from abc import ABC, abstractmethod
+from typing import Union
 
 
 class RPCConnection(ABC):
@@ -9,14 +10,16 @@ class RPCConnection(ABC):
     """
 
     @abstractmethod
-    def send(self, *args, **kwargs):
+    def send(self, message: Union[str, bytes], **kwargs):
         """
         Send a message without waiting for an answer.
         """
         ...
 
     @abstractmethod
-    def send_and_receive(self, *args, **kwargs):
+    def send_and_receive(
+            self, message: Union[str, bytes], **kwargs
+    ) -> Union[str, bytes]:
         """
         Send a message and wait for the connected server response.
         """
@@ -25,7 +28,7 @@ class RPCConnection(ABC):
 
 class RPCConnector(ABC):
     """
-    Class responsible to provide an interface to obtain a new connection.
+    Interface to obtain a new connection.
 
     Each time the get_connection method is called, it should provide a new
     connection instance yielding it.

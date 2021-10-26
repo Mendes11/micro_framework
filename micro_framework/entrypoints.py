@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class Entrypoint(Extension):
-    route = None
+    route: Route = None
 
     def bind(self, runner, parent=None):
         ext = super(Entrypoint, self).bind(runner, parent=parent)
