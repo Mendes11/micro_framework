@@ -1,14 +1,13 @@
 import logging
-from functools import partial
-from typing import Dict
 
 from kombu import Exchange, producers
 
 from micro_framework.amqp.amqp_elements import get_connection, Publisher
 from micro_framework.amqp.connectors import AMQPRPCConnector
 from micro_framework.amqp.rpc import RPCReplyListener
-from micro_framework.dependencies import Dependency, RunnerDependency
+from micro_framework.dependencies import Dependency
 from micro_framework.rpc import RPCServiceProvider, RPCProvider
+from micro_framework.rpc.dependencies import RPCProviderFactories
 
 logger = logging.getLogger(__name__)
 
@@ -52,29 +51,34 @@ class Producer(Dependency):
         return dispatch_event
 
 
-class RPCProviderMixin:
-    reply_listener = RPCReplyListener()
+class AMQPRPCFactories(RPCProviderFactories):
+    def __init__(self, provider, config):
+        super(AMQPRPCFactories, self).__init__(provider, config)
+        self.reply_listener = provider.reply_listener.picklable_listener
 
     def new_connector(self, service_name: str) -> AMQPRPCConnector:
         return AMQPRPCConnector(
             self.config.get("AMQP_URI"),
             target_service=service_name,
-            reply_listener=self.reply_listener.picklable_listener
+            reply_listener=self.reply_listener
         )
 
 
-class RPCProxyProvider(RPCProviderMixin, RPCServiceProvider):
+class RPCProxyProvider(RPCServiceProvider.with_factory(AMQPRPCFactories)):
     """
     Provides a RPCServiceProxy with AMQPRPCConnector class handling the
     communication through AMQP Protocol.
     """
+    reply_listener = RPCReplyListener()
 
 
-class RPCSystemProxyProvider(RPCProviderMixin, RPCProvider):
+class RPCSystemProxyProvider(RPCProvider.with_factory(AMQPRPCFactories)):
     """
     Provides RPCProxy instance with AMQPRPCConnector class handling the
     communication through AMQP Protocol.
     """
+    reply_listener = RPCReplyListener()
+
 
 def dispatch(amqp_uri, exchange, routing_key, payload, amqp_heartbeat=None,
              **kwargs):
