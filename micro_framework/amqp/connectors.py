@@ -1,5 +1,6 @@
 import json
 import uuid
+from contextlib import contextmanager
 
 from kombu import Queue
 
@@ -31,7 +32,7 @@ class RPCProducer(Publisher, RPCConnection):
         self.reply_listener = reply_listener
         self.reply_to_queue = reply_listener.queue
 
-    def send(self, payload, *args, **kwargs):
+    def send(self, payload, **kwargs):
         payload = json.loads(payload)
         exchange = rpc_exchange()
         target_id = payload["command"]
@@ -54,7 +55,7 @@ class RPCProducer(Publisher, RPCConnection):
                 **kwargs
             )
 
-    def send_and_receive(self, *args, **kwargs):
+    def send_and_receive(self, payload, **kwargs):
         corr_id = str(uuid.uuid4())
         timeout = kwargs.pop("timeout", None)
 
@@ -62,7 +63,7 @@ class RPCProducer(Publisher, RPCConnection):
         # ListenerReceiver.
         receiver = self.reply_listener.register_new_correlation(corr_id)
         self.send(
-            *args, correlation_id=corr_id,
+            payload, correlation_id=corr_id,
             reply_to=self.reply_to_queue.routing_key,
             mandatory=True,
 
@@ -92,8 +93,10 @@ class AMQPRPCConnector(RPCConnector):
         self.target_service = target_service
         self.reply_listener = reply_listener
 
+    @contextmanager
     def get_connection(self):
-        return RPCProducer(
-            self.amqp_uri, reply_listener=self.reply_listener,
+        yield RPCProducer(
+            self.amqp_uri,
+            reply_listener=self.reply_listener,
             target_service=self.target_service
         )

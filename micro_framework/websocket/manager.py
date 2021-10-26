@@ -1,14 +1,14 @@
 import asyncio
 import logging
 
-from micro_framework.rpc import RPCManagerMixin, format_rpc_response
+from micro_framework.rpc import RPCManager, format_rpc_response
 from micro_framework.websocket.metrics import active_connections
 from micro_framework.websocket.server import WebSocketServer
 
 logger = logging.getLogger(__name__)
 
 
-class WebSocketManager(RPCManagerMixin, WebSocketServer):
+class WebSocketManager(RPCManager, WebSocketServer):
     """
     RPCManager implementation using WebSockets.
 

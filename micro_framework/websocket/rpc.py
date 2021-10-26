@@ -5,7 +5,7 @@ import websockets
 
 import micro_framework.amqp.amqp_elements
 from micro_framework.exceptions import MaxConnectionsReached
-from micro_framework.rpc import RPCTarget, parse_rpc_response, RPCProxy
+from micro_framework.rpc import RPCTarget, parse_rpc_response, RPCService
 
 
 class WSRPCTarget(RPCTarget):
@@ -29,5 +29,5 @@ class WSRPCTarget(RPCTarget):
         return result
 
 
-class WSRPCProxy(RPCProxy):
+class WSRPCProxy(RPCService):
     target_class = WSRPCTarget

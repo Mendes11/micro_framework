@@ -11,7 +11,7 @@ from micro_framework.amqp.exceptions import DuplicatedListener
 from micro_framework.exceptions import ExtensionIsStopped, PoolStopped, \
     RPCTargetDoesNotExist
 from micro_framework.extensions import Extension
-from micro_framework.rpc import RPCManagerMixin, format_rpc_response
+from micro_framework.rpc import RPCManager, format_rpc_response
 
 logger = logging.getLogger(__name__)
 
@@ -165,9 +165,32 @@ class ConsumerManager(Extension, ConsumerMixin):
         message.requeue()
 
 
-class RPCManager(RPCManagerMixin, ConsumerMixin):
+class AMQPRPCManager(RPCManager, ConsumerMixin):
+    """
+
+    AMQP RPC Manager
+
+    This class defines each target as a queue. It binds a queue named
+    'rpc-<service_name>-<target_id>' to a topic exchange named 'ufw-exchange'
+    by a routing key named '<service_name>.<target_id>'
+
+    Due to this structure, we cannot allow a target being exposed twice by
+    different Entrypoint classes, since the target_id and service_name would
+    be the same and the manager wouldn't know to which Entrypoint it should
+    route a message.
+
+    This Manager also defines a Broadcast system, whenever a message is sent
+    through the 'ufw-exchange' with a routing_key of
+    '<service_name>._broadcast.<internal_commmand>'
+
+    The system should consider this an internal RPC implementation of a
+    service trying to discover RPC targets of '<service_name>' service. The
+    <internal_command> should be one of the provided by RPCManager (List
+    Targets or Get Target).
+
+    """
     def __init__(self):
-        super(RPCManager, self).__init__()
+        super(AMQPRPCManager, self).__init__()
         self.connection = None
         self.started = False
         self.message_lock = Lock()
