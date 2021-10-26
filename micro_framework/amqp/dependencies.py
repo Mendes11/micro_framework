@@ -1,5 +1,7 @@
 import logging
+from typing import Dict, Union
 
+from amqp.exceptions import NotFound
 from kombu import Exchange, producers
 
 from micro_framework.amqp.amqp_elements import get_connection, Publisher
@@ -12,15 +14,11 @@ from micro_framework.rpc.dependencies import RPCProviderFactories
 logger = logging.getLogger(__name__)
 
 
-class Producer(Dependency):
-    def __init__(self, confirm_publish=True, service_name=None):
-        self.service_name = service_name
+class SystemProducer(Dependency):
+    def __init__(self, confirm_publish=True):
         self.confirm_publish = confirm_publish
 
-    @property
-    def exchange(self):
-        service_name = self.service_name or self.config['SERVICE_NAME']
-        exchange_name = f"{service_name}.events"  # Nameko Compatible
+    def get_exchange(self, exchange_name):
         return Exchange(exchange_name, type='topic', auto_delete=True)
 
     @property
@@ -32,23 +30,55 @@ class Producer(Dependency):
         return {
             'confirm_publish': self.confirm_publish
         }
-    
-    def bind(self, runner, parent=None):
-        return super(Producer, self).bind(runner, parent)
 
     async def setup(self):
         self._publisher = Publisher(self.amqp_uri)
 
     async def get_dependency(self, worker):
         self.config = worker.config
-        exchange = self.exchange
 
-        def dispatch_event(event_name, payload):
-            return self._publisher.publish(
-                payload, exchange=exchange, routing_key=event_name
-            )
+        def dispatch_event(service_name, event_name, payload):
+            exchange_name = None
+            if service_name is not None:
+                exchange_name = f"{service_name}.events"
+
+            exchange = self.get_exchange(exchange_name)
+            try:
+                return self._publisher.publish(
+                    payload, exchange=exchange, routing_key=event_name
+                )
+            except NotFound:
+                pass
 
         return dispatch_event
+
+    def __call__(self, service_name: str, event_name: str, payload: Union[str, Dict]):
+        ... # Signature of the injected dependency
+
+
+class Producer(SystemProducer):
+    def __init__(self, confirm_publish=True, service_name=None):
+        self.service_name = service_name
+        super(Producer, self).__init__(confirm_publish)
+
+    async def get_dependency(self, worker):
+        self.config = worker.config
+        service_name = self.service_name or self.config['SERVICE_NAME']
+        exchange_name = f"{service_name}.events"  # Nameko Compatible
+        exchange = self.get_exchange(exchange_name)
+
+        def dispatch_event(event_name, payload):
+            try:
+                return self._publisher.publish(
+                    payload, exchange=exchange, routing_key=event_name
+                )
+            except NotFound:
+                pass
+
+        return dispatch_event
+
+    def __call__(self, event_name: str, payload: Union[str, Dict]):
+        ... # Signature of the injected dependency
 
 
 class AMQPRPCFactories(RPCProviderFactories):

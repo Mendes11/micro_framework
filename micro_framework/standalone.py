@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from threading import Thread
 
 from micro_framework import Runner, Route
-from micro_framework.amqp.dependencies import Producer, RPCSystemProxyProvider
+from micro_framework.amqp.dependencies import SystemProducer, RPCSystemProxyProvider
 from micro_framework.targets import TargetClassMethod, ClassTargetExecutor
 
 
@@ -18,7 +18,7 @@ class StandaloneTarget(TargetClassMethod):
 
 
 class Client:
-    dispatch = Producer()
+    dispatch = SystemProducer()
     amqp_rpc = RPCSystemProxyProvider()
 
     def __call__(self):
