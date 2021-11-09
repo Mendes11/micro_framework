@@ -5,26 +5,24 @@ from micro_framework.rpc.proxies import RPCSystem, RPCService
 
 pytestmark = pytest.mark.asyncio
 
-
-async def test_rpc_provider():
-    provider = RPCProvider()
-
-    dep = await provider.get_dependency(None)
-
-    assert isinstance(dep, RPCSystem)
-    assert dep.new_service_proxy == provider.new_service_proxy
+@pytest.fixture
+def worker(mocker):
+    return mocker.MagicMock(config={})
 
 
-async def test_rpc_service_provider(mocker):
-    provider = RPCServiceProvider("test_service")
+async def test_rpc_provider(worker, mocker):
+    rpc_factory = mocker.MagicMock(__name__="MockFactory")
+    provider = RPCProvider.with_factory(rpc_factory)()
+    await provider.setup_dependency(worker)
+    dep = await provider.get_dependency(worker)
 
-    connector = mocker.patch("micro_framework.rpc.dependencies.RPCConnector")
-    client = mocker.patch("micro_framework.rpc.dependencies.RPCClient")
+    assert dep == rpc_factory().get_rpc_system_proxy.return_value
 
-    dep = await provider.get_dependency(None)
+async def test_rpc_service_provider(mocker, worker):
+    rpc_factory = mocker.MagicMock(__name__="MockFactory", spec=RPCService)
+    provider = RPCServiceProvider.with_factory(rpc_factory)("test_service")
 
-    assert isinstance(dep, RPCService)
-    assert dep._target_factory == provider.new_rpc_target_proxy
-    assert dep._client == provider.new_client("test_service")
+    await provider.setup_dependency(worker)
+    dep = await provider.get_dependency(worker)
 
-    client.assert_called_with(connector.return_value)
+    assert dep == rpc_factory().new_service_proxy.return_value
