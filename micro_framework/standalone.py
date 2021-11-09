@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import contextmanager
 from threading import Thread
 
@@ -6,6 +7,7 @@ from micro_framework import Runner, Route
 from micro_framework.amqp.dependencies import Producer, RPCSystemProxyProvider
 from micro_framework.targets import TargetClassMethod, ClassTargetExecutor
 
+logger = logging.getLogger(__name__)
 
 class StandaloneExecutor(ClassTargetExecutor):
     async def after_call(self):
@@ -72,6 +74,13 @@ def _get_runner(config, worker_mode="thread"):
 
 @contextmanager
 def ufw_client(config):
+    logger.warning(
+        "THIS FEATURE IS IN BETA AND SHOULD NOT BE USED IN PRODUCTION"
+    )
+    logger.warning(
+        "Known Issues are: "
+        "* code stuck when exceptions are raised"
+    )
     event_loop = asyncio.new_event_loop()
     t = Thread(target=start_loop, args=(event_loop, ), daemon=True)
     t.start()
