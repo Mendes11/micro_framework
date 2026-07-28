@@ -406,7 +406,11 @@ class Runner:
 
 
     def start(self):
-        self.event_loop = asyncio.get_event_loop()
+        try:
+            self.event_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self.event_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.event_loop)
         self.event_loop.set_exception_handler(self.exception_handler)
         try:
             self.event_loop.run_until_complete(self._start())
